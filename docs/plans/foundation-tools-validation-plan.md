@@ -9,7 +9,7 @@
 - [x] Step 2: Config (`src/config.py`)
 - [x] Step 3: Console (`src/console.py`)
 - [x] Step 4: Tool result base (`src/tools/base.py`)
-- [ ] Step 5: Calculator
+- [x] Step 5: Calculator
 - [ ] Step 6: File tools
 - [ ] Step 7: Web search
 - [ ] Step 8: Tool registry
