@@ -4,17 +4,22 @@ Architecture layer: 6 (entry point). It builds the graph, connects the trace log
 layer, runs the graph, and writes exactly one `run_end` event per run, also when the run
 crashes. The benchmark and the UI call `run_task`; the CLI at the bottom of this file calls
 it too.
+
+Terminal use: `python -m src.run "your task here"`.
 """
 
+import argparse
 import time
 from pathlib import Path
 from typing import Any, cast
 
 from langchain_core.language_models import BaseChatModel
+from rich.markup import escape
 
-from src.config import LOGS_DIR, MAX_PLAN_STEPS, Settings, get_settings
+from src.config import LOGS_DIR, MAX_PLAN_STEPS, ConfigError, Settings, get_settings
+from src.console import ERROR, SUCCESS, console, print_record
 from src.graph import build_graph, recursion_limit
-from src.logger import RecordCallback, TraceLogger, new_run_id, trim
+from src.logger import RecordCallback, TraceLogger, new_run_id, trace_path, trim
 from src.state import MAX_TASK_CHARS, AgentState, initial_state
 
 # WHY: an exception message can be long (a whole HTTP body); the trace and `error` stay small.
@@ -162,3 +167,40 @@ def run_task(
         },
     )
     return state
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Command line entry: run one task and show the events live.
+
+    Args:
+        argv: the arguments after the program name. Default: `sys.argv[1:]`.
+
+    Returns:
+        The exit code: 0 when the run is done, 1 when it failed, 2 on a configuration error.
+        A missing task makes `argparse` exit with 2 as well.
+    """
+    parser = argparse.ArgumentParser(
+        prog="python -m src.run", description="Run one task with the multi-agent orchestrator."
+    )
+    parser.add_argument("task", help="the task, in plain language (put it in quotes)")
+    args = parser.parse_args(argv)
+
+    # WHY: `print_record` is the live display; it gets the same records the logger writes.
+    try:
+        state = run_task(args.task, on_record=print_record)
+    except ConfigError as exc:
+        # WHY: a setup mistake needs a short message, not a traceback.
+        console.print(escape(str(exc)), style=ERROR, highlight=False)
+        return 2
+
+    done = state["status"] == "done"
+    console.print("")
+    console.print(
+        escape(f"Final answer: {state['final_answer']}"), style=SUCCESS if done else ERROR
+    )
+    console.print(f"Trace: {escape(str(trace_path(state['run_id'])))}", highlight=False)
+    return 0 if done else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
