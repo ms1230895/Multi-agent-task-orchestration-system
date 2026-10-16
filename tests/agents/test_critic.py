@@ -262,11 +262,26 @@ def test_ac35_ac36_run_critic_results_block_is_safe_and_the_prompt_allows_no_too
     # WHY: an earlier result is untrusted tool text, so it must not close its own block, and
     # it must be cut so the prompt stays small.
     assert text.count("</results>") == 1
-    assert "r" * 2000 not in text
+    # WHY: the cap is a real cap (not just "less than 2000"), so the prompt stays small.
+    assert 1500 < text.count("r") <= 2000
     # NOTE: the prompt is wrapped over several lines, so line breaks are ignored here.
     system = " ".join(str(llm.calls[0][0].content).split())
     assert "<results>" in system
     assert "do not retry only because no tool was called" in system
+    # WHY: the looser rule must not cover a step that asks for new data (review finding S4).
+    assert "asks for no new data" in system
+    assert "A step that asks for new data still needs a successful call" in system
+
+
+def test_run_critic_long_first_result_does_not_push_out_the_newest_result() -> None:
+    llm = RecordingFakeLLM(critic_replies=[APPROVE])
+    state = _state(plan=["one", "two", "three"], current_step=2)
+    state["step_results"] = ["a" * 4000, "NEWEST-RESULT"]
+    run_critic(state, llm=llm)
+    text = str(llm.calls[0][1].content)
+    # WHY: the step usually needs the result just before it; cutting the joined text kept the
+    # oldest results and dropped this one (review finding 5, D46).
+    assert "Step 2: NEWEST-RESULT" in text
 
 
 def test_ac41_critic_system_prompt_explains_backslash_n_in_the_tool_log() -> None:

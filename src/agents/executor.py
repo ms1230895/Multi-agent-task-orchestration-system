@@ -102,8 +102,14 @@ def _log_line(name: Any, args: Any, outcome: Any) -> str:
     # and the critic said a 7-line file had 1 line (D45). Line breaks become the two visible
     # characters backslash-n, so the line structure survives and one call is still one line.
     # Every other kind of whitespace (tab, U+2028, ...) still collapses to a space.
+    # A backslash that is really in the result is written twice first, so a file that holds the
+    # characters backslash-n cannot be mistaken for a line break (review finding S5, D46).
     outcome_text = (
-        str(outcome).replace("\r\n", "\n").replace("\r", "\n").replace("\n", LINE_BREAK_MARK)
+        str(outcome)
+        .replace("\\", "\\\\")
+        .replace("\r\n", "\n")
+        .replace("\r", "\n")
+        .replace("\n", LINE_BREAK_MARK)
     )
     return (
         f"{_one_line(name, MAX_LOG_NAME_CHARS)}({_one_line(args_text, MAX_LOG_ITEM_CHARS)}) -> "
