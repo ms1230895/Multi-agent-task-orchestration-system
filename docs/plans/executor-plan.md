@@ -5,7 +5,7 @@
 **Status:** Approved
 
 ## Progress
-- [ ] Step 1: Tool definitions (`src/tools/definitions.py`)
+- [x] Step 1: Tool definitions (`src/tools/definitions.py`)
 - [ ] Step 2: Data markers (`src/agents/prompting.py`)
 - [ ] Step 3: Critic and planner prompt fixes
 - [ ] Step 4: Test fakes (role markers, `bind_tools`, stub moved)
