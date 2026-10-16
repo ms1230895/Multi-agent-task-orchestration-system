@@ -24,6 +24,9 @@ class AgentState(TypedDict):
     current_step: int  # index into plan, 0-based
     step_results: list[str]  # approved output of each finished step
     last_output: str  # executor output for the current step, waiting for the critic
+    # WHY: the critic sees only text, so without this it rejects correct work ("no tool call
+    # shown") and burns retries and replans. Real runs R2-R5 showed it.
+    last_tools: str  # log of the tool calls behind `last_output`, written by the executor
     verdict: str  # "approve", "retry", or "" before the first verdict
     feedback: str  # critic's explanation, passed to the executor or the planner
     retries: int  # retries used on the current step
@@ -65,6 +68,7 @@ def initial_state(task: str, run_id: str) -> AgentState:
         current_step=0,
         step_results=[],
         last_output="",
+        last_tools="",
         verdict="",
         feedback="",
         retries=0,

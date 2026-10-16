@@ -110,7 +110,7 @@ def test_ac7_run_executor_no_tool_needed_returns_text_without_calling_tools(
     spy = _install_spy(monkeypatch, CallToolSpy())
     llm = RecordingFakeLLM(executor_replies=[AIMessage("42")])
     result = run_executor(_state(), llm=llm, settings=S)
-    assert result == {"last_output": "42"}
+    assert result["last_output"] == "42"
     assert llm.count("executor") == 1
     assert spy.calls == []
 
@@ -127,7 +127,7 @@ def test_ac8_run_executor_one_tool_call_goes_through_gate_and_result_returns_to_
     assert len(answers) == 1
     assert answers[0].tool_call_id == "c1"
     assert answers[0].content == "42"
-    assert result == {"last_output": "42"}
+    assert result["last_output"] == "42"
 
 
 def test_ac9_run_executor_failed_call_gives_error_message_then_corrected_call_is_gated(
@@ -148,7 +148,7 @@ def test_ac9_run_executor_failed_call_gives_error_message_then_corrected_call_is
     assert str(first.content).startswith("error: ")
     assert "bad expression" in str(first.content)
     assert [c[1] for c in spy.calls] == [{"expression": "6 x 7"}, {"expression": "6*7"}]
-    assert result == {"last_output": "the answer is 42"}
+    assert result["last_output"] == "the answer is 42"
 
 
 def test_ac9_run_executor_successful_call_has_success_status(
@@ -266,7 +266,7 @@ def test_ac14_run_executor_empty_or_blank_final_reply_gives_empty_reply_output(
     _install_spy(monkeypatch, CallToolSpy())
     llm = RecordingFakeLLM(executor_replies=[AIMessage(text)])
     result = run_executor(_state(), llm=llm, settings=S)
-    assert result == {"last_output": EMPTY_REPLY_OUTPUT}
+    assert result["last_output"] == EMPTY_REPLY_OUTPUT
 
 
 # ---- AC15-AC17: the prompt ----
@@ -366,7 +366,7 @@ def test_ac19_run_executor_llm_connection_error_is_raised(
 def test_ac20_run_executor_returns_only_last_output(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_spy(monkeypatch, CallToolSpy())
     llm = RecordingFakeLLM(executor_replies=[AIMessage("42")])
-    assert set(run_executor(_state(), llm=llm, settings=S)) == {"last_output"}
+    assert set(run_executor(_state(), llm=llm, settings=S)) == {"last_output", "last_tools"}
 
 
 def test_ac20_run_executor_iteration_limit_result_has_only_last_output(
@@ -375,7 +375,7 @@ def test_ac20_run_executor_iteration_limit_result_has_only_last_output(
     _install_spy(monkeypatch, CallToolSpy())
     llm = RecordingFakeLLM(executor_replies=[_tool_reply(_calc("c1"))])
     result = run_executor(_state(), llm=llm, settings=_settings(MAX_TOOL_ITERATIONS="1"))
-    assert set(result) == {"last_output"}
+    assert set(result) == {"last_output", "last_tools"}
 
 
 # ---- AC21: no tool around the gate ----
@@ -408,4 +408,4 @@ def test_ac22_run_executor_real_gate_and_calculator_return_1024_to_the_llm() -> 
     answers = _tool_messages(llm.calls[1])
     assert len(answers) == 1
     assert answers[0].content == "1024"
-    assert result == {"last_output": "1024"}
+    assert result["last_output"] == "1024"

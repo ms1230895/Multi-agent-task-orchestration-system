@@ -61,6 +61,7 @@ def test_ac8_run_planner_valid_reply_returns_fresh_plan_state() -> None:
         "retries": 0,
         "step_results": [],
         "last_output": "",
+        "last_tools": "",
         "verdict": "",
         "feedback": "",
         "status": "running",

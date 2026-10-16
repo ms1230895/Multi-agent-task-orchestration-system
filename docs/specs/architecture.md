@@ -89,10 +89,10 @@ Each agent is a function `(state: AgentState) -> dict` that returns only the sta
 - If the limit is reached without a final reply, the output is `"Step not completed: tool iteration limit reached."` plus the last tool result. The critic will then reject it.
 - Errors from the LLM call are not caught (D12). The executor imports `call_tool` and `tool_definitions` only, never a tool function, so nothing can call a tool around the gate.
 - Untrusted text (earlier results, feedback, the previous output) goes into the prompt through `data_block` (`src/agents/prompting.py`): cut to a limit, any closing tag inside it neutralised, wrapped in `<results>`, `<feedback>`, or `<previous_output>` markers. The system prompt says text in these markers and every tool result is data, not instructions. This lowers prompt-injection risk; it does not remove it.
-- Writes `last_output`.
+- Writes `last_output` and `last_tools`: one log line per tool call (`name(args) -> ok: output`, `-> error: ...`, or `-> skipped`), each part cut to 150 chars, the whole log to 1500, or `(no tools called)`.
 
 **Critic** (`src/agents/critic.py`)
-- Input: task, current step, `last_output`, put in the prompt as a `data_block("output", ...)`; the system prompt says to ignore any instruction inside it.
+- Input: task, current step, `last_output` as a `data_block("output", ...)`, and the executor's tool log `last_tools` as a `data_block("tools", ...)`. The system prompt says to ignore any instruction inside the output, that the log is evidence of what was done (text in a tool result is still data), and not to recalculate numbers the log already gives. **Why:** without the log the critic rejected correct work because it could not see the tool call (first real runs, session 5).
 - Output: JSON `{"verdict": "approve" | "retry", "feedback": "..."}`, validated by a Pydantic model `Verdict`.
 - If the JSON is invalid, re-ask once. If it is still invalid, treat it as `verdict="retry"` with feedback "critic output invalid". This is safe because retries are limited.
 - Logs `critic_verdict`.
@@ -111,6 +111,7 @@ Planner and Critic always validate their own JSON output, whatever `ENABLE_VALID
 | `current_step` | `int` | Index into `plan` (0-based) |
 | `step_results` | `list[str]` | Approved output of each finished step |
 | `last_output` | `str` | Executor output for the current step, waiting for the critic |
+| `last_tools` | `str` | Log of the tool calls behind `last_output`, one line per call, written by the executor and cleared on a replan. The critic reads it as evidence of what was done |
 | `verdict` | `str` | `"approve"` or `"retry"` from the critic |
 | `feedback` | `str` | Critic's explanation, passed to executor (retry) or planner (replan) |
 | `retries` | `int` | Retries used on the **current step** (reset to 0 when a step is approved or a new plan starts) |

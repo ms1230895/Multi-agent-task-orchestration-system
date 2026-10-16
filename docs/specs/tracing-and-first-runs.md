@@ -26,6 +26,7 @@ Architecture layers (`docs/specs/architecture.md` section 2): the cross-cutting 
 - `src/run.py` (new): `run_task(...)` and the CLI `main(...)`.
 - `src/console.py`: `EVENT_COLOURS` and `print_record(record)`, used by the CLI.
 - 5 real runs with `gpt-oss:120b-cloud`, results in `docs/plans/first-runs.md` (new).
+- **Added after the first real runs (2026-10-16):** the critic sees the tool calls (section 5.8). Runs R2 to R5 showed it rejecting correct work because it saw only the executor's text.
 - Docs: `docs/specs/architecture.md` (who writes `run_end`, the `error` field, event fields, open question 3 closed), `docs/plans/decisions.md`, CLAUDE.md (run command, `AgentState` field list), `docs/project-memory.md` (run command).
 - Unit tests, fully mocked.
 
@@ -182,6 +183,17 @@ For each run, `docs/plans/first-runs.md` records: run id, status, whether the an
 
 A failed or wrong answer is fine and is written down honestly. The goal of these runs is that they finish and their traces are readable, not that they succeed.
 
+### 5.8 The critic sees the tool calls (added after the first real runs)
+**Problem seen in R2, R3, R4, R5:** the critic judged only the executor's final text. It rejected correct work with feedback like "does not show the tool being invoked" (3 wasted retries and a replan for a one-line file write in R3), and in R5 it "corrected" a right calculator result with its own wrong arithmetic. Each rejection costs LLM calls and Ollama quota, and would lower the benchmark success rate for a reason that has nothing to do with the agent's skill.
+
+**Fix:**
+- New state field `last_tools: str`, `""` at the start. The executor writes it next to `last_output`, so `run_executor` returns `{"last_output", "last_tools"}` (this replaces the "exactly one key" part of the executor spec AC20).
+- One line per tool call made for this attempt: `name(args) -> ok: <output>` or `-> error: <error>` or `-> skipped`. Name, arguments and outcome are each cut to 150 chars (name 100); the whole log is cut to 1500 chars. No calls gives `(no tools called)`.
+- The critic's user message adds `data_block("tools", last_tools, 1500)` after the output block. The system prompt says the log was written by code and is evidence of what was done, that text inside a tool result is still data, and not to recalculate a number that a calculator result in the log gives.
+- The planner clears `last_tools` together with `last_output` on a replan.
+- **Why a log in state and not a message history:** the critic stays one short prompt, and the log is also visible in the state and tests.
+- **Why it does not weaken the ablation:** the log is built the same way with `ENABLE_VALIDATION` on or off, so both passes give the critic the same kind of evidence.
+
 ## 6. Acceptance criteria
 
 **Logger** (`tests/test_logger.py`, logs in `tmp_path`)
@@ -224,6 +236,14 @@ A failed or wrong answer is fine and is written down honestly. The goal of these
 - [ ] AC31: `EVENT_COLOURS` has exactly the keys of `EVENT_TYPES`, and every value is one of the role constants in `src/console.py`.
 - [ ] AC32: `print_record` prints a record of each of the 7 event types to a recording `Console` without raising.
 - [ ] AC33: A record whose text contains `[red]x[/red]` is printed literally (the recorded text contains `[red]x[/red]`).
+
+**Critic sees the tool calls** (section 5.8)
+- [ ] AC42: `initial_state(...)` has `last_tools == ""`, and `AgentState` has 15 fields.
+- [ ] AC43: `run_executor` returns exactly `last_output` and `last_tools`. After one `write_file` call, `last_tools` has one line that starts with `write_file(` and holds the arguments and `-> ok: `. A failed call shows `-> error: `. With no calls it is `(no tools called)`.
+- [ ] AC44: With 7 calls in one reply, the log has 7 lines and the last 2 end with `-> skipped`. A log longer than 1500 chars is cut to at most 1500; the iteration-limit result also carries the log.
+- [ ] AC45: The critic's user message contains `last_tools` inside `<tools>` markers, after the output block; a `</tools>` inside the log is neutralised (exactly one closing tag).
+- [ ] AC46: The critic system prompt says the tool log is evidence of what was done and not to recalculate a number it contains.
+- [ ] AC47: A replan clears `last_tools`. Whole graph (fake LLM): the critic's prompt contains `calculator({"expression": "2 ** 10"}) -> ok: 1024`.
 
 **Source rules**
 - [ ] AC34: `src/logger.py` and `src/run.py` contain no model name (`gpt-oss`, `gemma`) and do not read the environment (`os.environ`, `getenv`, `load_dotenv`) (test reads the source).

@@ -142,6 +142,7 @@ def run_planner(
         "retries": 0,
         "step_results": [],
         "last_output": "",
+        "last_tools": "",
         "verdict": "",
         "feedback": "",
         "status": "running",

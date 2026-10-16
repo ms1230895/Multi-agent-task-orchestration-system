@@ -15,6 +15,7 @@
 - [x] Step 8: CLI `python -m src.run`
 - [x] Step 9: Docs sync
 - [ ] Step 10: First real runs and `docs/plans/first-runs.md`
+- [x] Step 11: Critic sees the tool calls (added after runs R2 to R5)
 
 ## Overview
 Build bottom-up. First the logger and its helpers, which every other part uses. Then the new state field, then event emission layer by layer (agents, then `advance` and the graph), and then `run_task` on top. The display (console, CLI) comes after `run_task` works, and the docs follow. The real runs come last, once everything is tested with fakes. Each step ends with a short check (`python -` script with the fake LLM and `tmp_path`-style temp folders, no network) plus `ruff check`. The full test suite is written afterwards with `/test`.
@@ -119,6 +120,18 @@ The spec's open questions are settled with the spec's own choices (running this 
 - **Check:** the `read_trace` script: model `gpt-oss:120b-cloud` on every line, exactly one `run_end` as the last line, `duration_ms` under 15 minutes, no `GraphRecursionError`.
 - **Done when:** 5 traces pass the check and `first-runs.md` has the problems list. Wrong answers are allowed and written down honestly.
 - **Covers:** AC38, AC39, AC40
+
+### Step 11: Critic sees the tool calls (added after the first real runs)
+- **Why added:** runs R2, R3, R4 and R5 showed the critic rejecting correct work because it saw only the executor's text, not the tool calls. Gaurav decided to fix it in this branch (2026-10-16). It changes the spec (AC20, new AC42 to AC47) and the architecture.
+- **Files:** `src/state.py`, `src/agents/executor.py`, `src/agents/critic.py`, `src/agents/planner.py`, `tests/` (existing tests that assert the exact executor result), spec, architecture, decisions.
+- **What:**
+  - `AgentState.last_tools: str` (`""` at start): a short log of the tool calls made for the current step attempt.
+  - Executor returns `{"last_output", "last_tools"}`. One line per call: `name(args) -> ok: output` or `-> error: ...`, each cut to 150 chars, calls past the per-reply limit as `-> skipped`, the whole log cut to 1500 chars, `(no tools called)` when there were none.
+  - Critic prompt gets the log in a `data_block("tools", ...)`; the system prompt says the log is written by code and is evidence of what was done, and not to recalculate a number that appears in it.
+  - Planner clears `last_tools` on a replan, with `last_output`.
+- **Check:** script: the R3 case (a `write_file` call, then text) now gives the critic a prompt with the `write_file` line inside `<tools>`; the full suite passes after the six exact-result tests are updated. `ruff check`.
+- **Done when:** AC42 to AC47 hold in the check script.
+- **Covers:** AC20 (changed), AC42–AC47
 
 ## Risks
 - **`graph.stream(stream_mode="values")` behaves differently from `invoke`** (for example the first yielded value is the input state, or the final value differs). Fallback: check in step 6 that the last streamed value equals what `invoke` returns for the same fake run; if not, keep the last good state through the `emit` events and use `invoke`.
