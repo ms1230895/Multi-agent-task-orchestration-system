@@ -65,7 +65,7 @@ Every tool call from the executor goes through one function, `call_tool(name, ar
 2. **Arguments valid?** (only when `ENABLE_VALIDATION=true`) Validate `args` against the tool's Pydantic schema. On failure, return `ok=False` with a short readable list of what is wrong (field, problem). Log a `validation_error` event.
 3. **Run** the function inside `try/except Exception`. Any exception becomes `ok=False, error="<type>: <message>"`.
 4. **Retry** (only when `ENABLE_RETRY=true`): if the failure is *transient* (network error, timeout, rate limit from `ddgs`), wait (backoff 1 s, then 2 s, then 4 s at most) and run again, up to `TOOL_RETRY_ATTEMPTS` extra attempts. Log a `retry` event per attempt. A tool marks a failure as transient by starting its error text with `"transient: "` (`TRANSIENT_PREFIX` in `src/tools/base.py`), which keeps the return format exactly `{ok, output, error}`. In `ddgs` 9.x only timeouts have their own exception; a rate limit arrives as a plain `DDGSException`, so `web_search` also looks for rate-limit and timeout words in the message. Validation errors are never retried by the gate: the same bad arguments would fail again. Instead, the error goes back to the LLM so it can fix them (see Executor).
-5. Log a `tool_call` event with name, args, ok, a trimmed output or error, attempts, and duration. `call_tool` does not write the trace itself: it sends events to an optional `on_event(event, data)` callback, and the logger (session 5) is connected there. A callback that raises never changes the tool result.
+5. Log a `tool_call` event with name, args, ok, a trimmed output or error, attempts, and duration. `call_tool` does not write the trace itself: it sends events to an optional `on_event(event, data)` callback, and `run_task` connects the trace logger there. A callback that raises never changes the tool result.
 
 When `ENABLE_VALIDATION=false`, step 2 is skipped. The raw arguments go straight to the function, and bad arguments fail inside it (caught by step 3). This is the "off" side of the ablation.
 
@@ -76,7 +76,7 @@ Each agent is a function `(state: AgentState) -> dict` that returns only the sta
 - Input: `task`. On a replan it also gets the old plan, the step results so far, and the critic's last feedback.
 - On a replan, step results and the critic's feedback go into the prompt as `data_block`s (untrusted text, see Executor).
 - Output: JSON `{"steps": ["...", "..."]}`, validated by a Pydantic model `Plan` (1 to `MAX_PLAN_STEPS` = 6 steps, each a non-empty string).
-- If the JSON is invalid, re-ask once with the validation error. If it is still invalid, set `status="failed"` (the router then finalizes).
+- If the JSON is invalid, re-ask once with the validation error. If it is still invalid, set `status="failed"` (the graph then goes straight to `finalize`).
 - Logs `plan_created` (or `replan` on a replan) with the steps.
 
 **Executor** (`src/agents/executor.py`)
@@ -118,6 +118,7 @@ Planner and Critic always validate their own JSON output, whatever `ENABLE_VALID
 | `final_answer` | `str` | Set by finalize |
 | `status` | `str` | `"running"`, `"done"`, or `"failed"` |
 | `route` | `str` | The decision `advance` made: `next_step`, `done`, `retry`, `replan`, or `failed` (`""` before the first one). The edge after `advance` only reads it. |
+| `error` | `str` | `""`, or `"<ExceptionType>: <message>"` when `run_task` caught a crash or refused the task. Only `run_task` sets it. The benchmark reads the type to tell a usage cap or connection error from an agent failure. |
 
 **Graph**
 
@@ -151,14 +152,17 @@ There is also a conditional edge after the planner: if the planner gave up (`sta
 
 On a replan, `advance` only increments `replans`. The planner then reads the old plan, step results and feedback, and returns the new plan with `current_step = 0`, `retries = 0` and `step_results`, `verdict` and `feedback` cleared. The old results reach the planner through its prompt, so useful work is not lost.
 
-**Finalize** builds `final_answer`: the last approved step result if status is done, or a short failure message with the best partial result if failed. It logs `run_end`.
+**Finalize** builds `final_answer`: the last approved step result if status is done, or a short failure message with the best partial result if failed. It writes no trace event: `run_task` writes `run_end` (section 2.6), so a crashed run, where `finalize` never runs, still gets one.
 
 **Hard limits** (Hard rule 5): `MAX_RETRIES` (default 2), `MAX_REPLANS` (default 1), `MAX_TOOL_ITERATIONS` (default 5), `MAX_PLAN_STEPS` (6, a constant in `src/config.py`, not an `.env` setting), and LangGraph `recursion_limit` (`recursion_limit(settings)` in `src/graph.py`). The recursion limit is computed from the other limits, roughly `MAX_PLAN_STEPS × (MAX_RETRIES + 1) × (MAX_REPLANS + 1) × 4 + 10`, so the router's limits always trigger first. If the recursion limit is ever hit, that is a bug.
 
 ### 2.6 Entry point
 `src/run.py`:
-- `run_task(task: str) -> AgentState`: creates `run_id`, opens the trace, builds and invokes the graph with `recursion_limit`, and returns the final state. It never raises: an unexpected exception is caught, logged as `run_end` with `status="failed"` and the error, and returned as a failed state.
-- CLI: `python -m src.run "your task here"` prints the plan, steps, verdicts, and final answer with `rich`.
+- `run_task(task, *, on_record=None, llm=None, settings=None, logs_dir=None) -> AgentState`: reads the settings, makes the `run_id` (`new_run_id()`, always made inside `run_task`), opens the `TraceLogger`, builds the graph with an `on_event` handler, runs it with `graph.stream(..., stream_mode="values")` and `recursion_limit`, and returns the last state. Streaming keeps the last good state, so a crash still reports the plan and partial results.
+- **Live events:** `on_record(record)` is called with every trace record as it is written, so a terminal or UI shows the same events the logger writes. An exception in it is ignored.
+- **Never raises, with one exception.** A `ConfigError` (missing or invalid setting) is raised before a run exists: there is no model to put in a trace. Anything else (LLM connection error, usage cap, timeout, `GraphRecursionError`, a bug) becomes a failed state with `error="<Type>: <message>"` and a `run_end`. An empty or too long task does the same, without any LLM call. `KeyboardInterrupt` is not caught, so an interrupted run has no `run_end` and is not counted.
+- **`run_end` is written here**, not in `finalize`, so every run has exactly one, also after a crash.
+- CLI: `python -m src.run "your task here"` prints the events live with `rich` (`print_record` in `src/console.py`), then the final answer and the trace path. Exit code 0 done, 1 failed, 2 configuration error.
 
 ### 2.7 Benchmark
 - `benchmark/tasks.json`: 30 tasks. Each has `id`, `category` (calc, search, file, multi-tool), `task`, `checker` (checker name), and `expected` (checker arguments).
@@ -190,17 +194,19 @@ One file per run: `logs/<run_id>.jsonl`, one JSON object per line:
 ```json
 {"ts": "2026-10-16T12:00:00Z", "run_id": "...", "model": "gpt-oss:120b-cloud", "event": "tool_call", "data": {...}}
 ```
-Every line carries `model`, so a trace can never be mixed up between models. The `run_end` event also records the config flags and limits used.
+Every line carries `model`, so a trace can never be mixed up between models. The `run_end` event also records the task, the config flags and limits used, and the counters. Inside a run, layers send `(event, data)` to an `on_event` callback; `run_task` adds `ts`, `run_id` and `model`, writes the line, and passes the record to `on_record`. Long text fields are cut to 500 characters.
 
-| Event | When | Key `data` fields |
+| Event | Written by | `data` fields |
 |---|---|---|
-| `plan_created` | planner makes the first plan | `steps` |
-| `tool_call` | every gated tool call | `tool`, `args`, `ok`, `output`/`error` (trimmed), `attempts`, `duration_ms` |
-| `validation_error` | Pydantic rejects tool args | `tool`, `args`, `errors` |
-| `retry` | gate retries a transient error, or router sends a step back to the executor | `kind` (`tool` or `step`), `attempt`, `reason` |
-| `critic_verdict` | critic returns | `step`, `verdict`, `feedback` |
-| `replan` | planner makes a new plan | `replans`, `steps`, `reason` |
-| `run_end` | finalize, or a caught crash | `status`, `final_answer`, `counters`, `config`, `error` |
+| `plan_created` | planner, first valid plan | `steps` |
+| `tool_call` | `call_tool`, every gated tool call | `tool`, `args`, `ok`, `output`/`error` (trimmed), `attempts`, `duration_ms` |
+| `validation_error` | `call_tool`, Pydantic rejects tool args | `tool`, `args`, `errors` |
+| `retry` | `call_tool` (kind `tool`) or `advance` (kind `step`) | `kind`, `attempt`, `reason`; plus `tool` (kind `tool`) or `step` (kind `step`) |
+| `critic_verdict` | critic, every verdict | `step` (0-based), `verdict`, `feedback`, `output` (the executor output judged, trimmed) |
+| `replan` | planner, valid new plan | `replans`, `steps`, `reason` (the critic's last feedback) |
+| `run_end` | `run_task`, once per run, also after a crash | `task`, `status`, `final_answer`, `error`, `counters`, `config`, `duration_ms` |
+
+`run_end.counters`: `plan_steps`, `steps_done`, `replans`, `tool_calls`, `failed_tool_calls`, `validation_errors`, `tool_retries`, `step_retries`, `critic_verdicts`. The event counts come from the events, not from the state, because `retries` in the state resets on every step. `run_end.config` is the settings plus `max_plan_steps`; a test fixes its exact keys so a secret can never enter a trace (Hard rule 7).
 
 Traces are what we count for "reasoning traces across 100+ runs" and what we read when we debug failures.
 
@@ -226,4 +232,4 @@ A **pass** is one model + one config running all 30 tasks. The Ollama free plan 
 ## 6. Open questions
 1. ~~Critic `replan` verdict~~ Decided in session 3: only `approve` / `retry`. A replan happens only after the step's retries are used up. Revisit after the session 7 traces show whether retries are often wasted. See `docs/plans/decisions.md`.
 2. ~~`ENABLE_RETRY` scope~~ Decided in session 2: `ENABLE_RETRY` controls gate-level retries of transient tool errors only (counted by `TOOL_RETRY_ATTEMPTS`). Critic-driven step retries (`MAX_RETRIES`) stay on in both ablation passes. See `docs/plans/decisions.md`.
-3. The entry point is a new file, `src/run.py`, which is not yet in the CLAUDE.md layout. Alternative: put `run_task` in `src/graph.py`.
+3. ~~Entry point location~~ Decided in session 5: `run_task` lives in `src/run.py` (also the CLI), so `src/graph.py` stays free of logging and CLI code. See `docs/plans/decisions.md`.

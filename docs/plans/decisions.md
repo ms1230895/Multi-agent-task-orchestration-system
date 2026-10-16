@@ -84,3 +84,27 @@ It is gone from `src/`; the graph tests pass it explicitly. `RecordingFakeLLM` f
 Not fixed in session 4:
 - **Warnings:** one shared `ask_validated` helper for planner and critic (duplicated re-ask flow); a whole-graph test that the state is clean after a replan (AC38); two outdated lines in `architecture.md` (the planner failure "router then finalizes", and finalize "logs `run_end`", which is session 5); progress and AC checkboxes.
 - **Suggestions:** cap `parse_json_model` input and make the fence regex linear; cap `last_output` stored in `step_results` (the executor now caps new outputs at 4000); `recursion_limit` enforced in `build_graph`; misplaced `# WHY:` in `finalize`; unused `Status` and `VerdictValue` aliases; weak AC26 assertion; `or` defaults in `build_graph` (the executor default is now `is not None`); a test for the brace limitation in `parse_json_model`; missing docstrings and `# WHY:` in tests.
+
+## Session 5: tracing-and-first-runs (2026-10-16)
+
+### D23. `run_task` writes `run_end`, not `finalize`
+`finalize` writes no event. `run_task` writes the one `run_end` after the graph ends or crashes. **Why:** a crash means `finalize` never runs, and every run must have exactly one `run_end` (it is what we count as a traced run). It also lets `run_end` hold the settings, counters and duration, which `run_task` already has. This changes one line of the architecture, which is updated.
+
+### D24. `AgentState` has an `error` field
+`""` normally; `"<ExceptionType>: <message>"` (message cut to 300 chars) when `run_task` caught a crash or refused the task. **Why:** `run_task` never raises, so the benchmark needs another way to see that a run ended because of a usage cap or connection error and must be paused, not counted as an agent failure (D12). The alternative, a separate result object, would change the `run_task` signature.
+
+### D25. `ConfigError` is the one exception `run_task` raises
+**Why:** without valid settings there is no model name to put in a trace and nothing ran. The CLI turns it into exit code 2 and a short message.
+
+### D26. Live events by callback, not a generator
+`run_task(on_record=...)` is called with every trace record. **Why:** it works inside `call_tool`, which is not a graph node, a learner can follow it line by line, and Streamlit can update a page from a callback. A generator would need a thread or LangGraph streaming.
+
+### D27. `critic_verdict` carries the executor output
+The event has an `output` field (cut to 500 chars). **Why:** the executor has no event of its own, and without this a trace never shows what the executor answered, which is the first thing needed to debug a failed step in session 7.
+
+### D28. `trim` and `emit_safely` live in `src/logger.py`
+Moved from `src/validation.py` (`_trim`, `_emit`), behaviour unchanged. **Why:** the planner, critic, `advance` and the gate all need them, and one copy keeps the safe-callback rule (D5) in one place. Partly settles the "one shared `_trim` helper" item deferred in D8.
+
+### D29. The test spy for `call_tool` accepts `on_event`
+`CallToolSpy` in `tests/agents/test_executor.py` got an `on_event` keyword. **Why:** the executor now passes `on_event` to every `call_tool`, as the real gate accepts it. Spec AC17 said the old tests should pass unchanged; this is the one test helper that had to change, and no assertion changed.
+

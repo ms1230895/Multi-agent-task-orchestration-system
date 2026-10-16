@@ -9,6 +9,12 @@ My commands and prompts for this project. Claude Code appends to this file; I ca
 source .venv/bin/activate
 ```
 
+### Run a task
+```bash
+python -m src.run "your task here"
+```
+Runs one task with the Planner, Executor and Critic. Shows the events live in colour and writes the trace to `logs/<run_id>.jsonl`. Needs `OLLAMA_MODEL` in `.env`. Exit code 0 done, 1 failed, 2 configuration error.
+
 ## Claude Code commands
 <!-- slash commands and subagents, with one line each on what they do -->
 

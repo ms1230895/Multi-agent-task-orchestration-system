@@ -25,18 +25,19 @@ Report whatever numbers we actually get.
 - Run tests: `pytest -q`
 - Lint and format: `ruff check . --fix && ruff format .`
 - List Ollama models: `ollama list`
-Commands for running a task and the benchmark are added when those exist.
+- Run one task: `python -m src.run "your task here"` (prints the events live; the trace goes to `logs/<run_id>.jsonl`)
+The benchmark command is added when it exists.
 
 ## Architecture in brief
 Graph: START → planner → executor → critic → advance → router. If the planner fails, planner → finalize.
 Router: next step or retry → executor | replan → planner | done or limits used up → finalize → END.
-- Shared state: one TypedDict, `AgentState` (task, run_id, plan, current_step, step_results, last_output, verdict, feedback, retries, replans, final_answer, status, route).
+- Shared state: one TypedDict, `AgentState` (task, run_id, plan, current_step, step_results, last_output, verdict, feedback, retries, replans, final_answer, status, route, error).
 - The router is plain Python with hard limits (MAX_RETRIES, MAX_REPLANS). The critic gives a verdict; code decides where to go.
 - Every tool call passes one validation gate: tool exists → Pydantic arguments valid → run inside try/except → return `{ok, output, error}`.
 Full detail: `docs/specs/architecture.md`. Read it before changing the structure.
 
 ## Project layout
-- `src/`: config.py, state.py, tools/, validation.py, agents/, graph.py, logger.py, console.py
+- `src/`: config.py, state.py, tools/, validation.py, agents/, graph.py, run.py, logger.py, console.py
 - `benchmark/`: tasks.json, runner.py, checkers.py
 - `logs/` (run traces), `workspace/` (sandbox for file tools), `tests/` (mirrors `src/`)
 - `docs/specs/` (what we build), `docs/plans/` (plans and progress), `docs/project-memory.md`

@@ -13,7 +13,7 @@
 - [x] Step 6: `run_task` (`src/run.py`)
 - [x] Step 7: Console: `EVENT_COLOURS` and `print_record`
 - [x] Step 8: CLI `python -m src.run`
-- [ ] Step 9: Docs sync
+- [x] Step 9: Docs sync
 - [ ] Step 10: First real runs and `docs/plans/first-runs.md`
 
 ## Overview

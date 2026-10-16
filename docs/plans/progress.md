@@ -26,4 +26,4 @@
 - [x] Tool calling confirmed: gpt-oss:120b-cloud (main), gemma4:31b-cloud (second). deepseek not on free plan.
 - Were the Python libraries installed in this project's `.venv`?
 - GitHub MCP scope (`claude mcp list`)er 
-- Architecture open questions (see `docs/specs/architecture.md` section 6): critic `replan` verdict, scope of `ENABLE_RETRY`, `src/run.py` vs `src/graph.py`. Also update the `AgentState` field list in CLAUDE.md.
+- [x] Architecture open questions (section 6) all decided: critic verdicts (D13), `ENABLE_RETRY` scope (D1), `src/run.py` (D23-D26).
