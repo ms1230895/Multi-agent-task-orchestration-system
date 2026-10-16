@@ -422,11 +422,12 @@ def test_new_pass_progress_line_shows_position_id_verdict_and_seconds(
 
 def test_result_lines_are_ascii_so_unicode_line_separators_cannot_split_them(env: Env) -> None:
     """Spec 5.5 / D31: web text with U+2028 must not break the one-line-per-task format."""
-    # WHY: a split line would look like a half-written line and block the resume.
-    answer = "15 García" + " " + "tail"
+    # WHY: a split line would look like a half-written line and block the resume. The separator
+    # is written as an escape: a literal U+2028 is invisible and editors offer to strip it.
+    answer = "15 García" + "\u2028" + "tail"
     env.run(fake=env.fake({"calc-01": {"answer": answer}}))
     raw = (env.pass_dir() / "results.jsonl").read_text(encoding="utf-8")
-    assert " " not in raw
+    assert "\u2028" not in raw
     assert len([line for line in raw.split("\n") if line]) == 3
     assert env.results()[0]["final_answer"] == answer
 
