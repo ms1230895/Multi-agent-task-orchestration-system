@@ -18,6 +18,7 @@ EXPECTED_FIELDS = {
     "final_answer",
     "status",
     "route",
+    "error",
 }
 
 
@@ -38,8 +39,9 @@ def test_ac1_initial_state_returns_all_fields_with_start_values() -> None:
         "final_answer": "",
         "status": "running",
         "route": "",
+        "error": "",
     }
-    assert len(state) == 13
+    assert len(state) == 14
 
 
 @pytest.mark.parametrize("task", ["", "   ", "x" * (MAX_TASK_CHARS + 1)])
@@ -61,4 +63,4 @@ def test_ac2_initial_state_accepts_task_at_max_length() -> None:
 def test_ac3_agent_state_annotations_match_spec_fields() -> None:
     # WHY: the field list is documented in the spec and CLAUDE.md; drift must be noticed.
     assert set(AgentState.__annotations__) == EXPECTED_FIELDS
-    assert len(AgentState.__annotations__) == 13
+    assert len(AgentState.__annotations__) == 14

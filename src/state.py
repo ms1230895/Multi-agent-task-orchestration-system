@@ -33,6 +33,9 @@ class AgentState(TypedDict):
     # WHY: `advance` stores its decision here, so the edge function only reads it. After
     # `advance` moves the counters, the decision cannot be worked out again from the state.
     route: str  # a Route value, "" before the first decision
+    # WHY: `run_task` catches every crash. The benchmark must still tell a usage cap or
+    # connection error from an agent failure, so the exception type and message stay here.
+    error: str  # "" or "<ExceptionType>: <message>", set only by `run_task`
 
 
 def initial_state(task: str, run_id: str) -> AgentState:
@@ -69,4 +72,5 @@ def initial_state(task: str, run_id: str) -> AgentState:
         final_answer="",
         status="running",
         route="",
+        error="",
     )
