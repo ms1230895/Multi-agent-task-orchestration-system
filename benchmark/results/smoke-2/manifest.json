@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "pass_id": "smoke-2",
+  "model": "gpt-oss:120b-cloud",
+  "config": {
+    "ollama_model": "gpt-oss:120b-cloud",
+    "ollama_temperature": 0.0,
+    "ollama_timeout_s": 120,
+    "enable_validation": true,
+    "enable_retry": true,
+    "max_retries": 2,
+    "max_replans": 1,
+    "max_tool_iterations": 5,
+    "tool_retry_attempts": 2,
+    "max_plan_steps": 6
+  },
+  "code_fingerprint": "sha256:c605a2946df2e3eb5f56c0c97b52e53eb7e107595435f140289bfc6ddbf6cefe",
+  "task_ids": [
+    "calc-01",
+    "search-01",
+    "file-02"
+  ],
+  "git_commit": "095751369447bc870951015b995821102b1dd47b",
+  "git_dirty": false,
+  "started_at": "2026-10-16T19:04:48.331Z"
+}

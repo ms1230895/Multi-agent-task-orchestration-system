@@ -79,3 +79,11 @@ Said after `/code-review` listed findings and asked which to fix. Claude fixed a
 /create-spec benchmark
 ```
 No extra description: built from the roadmap entry for session 6, `docs/specs/architecture.md` (sections 2.7 and 5), decisions D12 and D24, and first-run problems P3 to P5. Use this short form when the roadmap already describes the session well. Model: opus, effort high.
+
+### 2026-10-17: Plan and implement session 6, benchmark
+```
+/create-plan benchmark
+/implement
+go
+```
+`/implement` was run without a feature name and Claude asked once, listing the 9 steps it would build in one go; "go" started them. The real smoke pass (step 10) needs you: set `.env`, then run `python -m benchmark.runner --pass <pass_id> --tasks calc-01,search-01,file-02` twice. Model: sonnet, effort medium.

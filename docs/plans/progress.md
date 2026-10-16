@@ -5,7 +5,7 @@
 - **Last completed:** Session 5, tracing-and-first-runs: done (510 tests pass; code review found 0 Critical, 8 Warnings fixed, Suggestions deferred in D31; `docs/plans/tracing-and-first-runs-plan.md`, `docs/plans/first-runs.md`, decisions D23-D31)
 - **Next:** Session 6, benchmark (spec: opus, high; implementation: sonnet, medium)
 - **Session 5, tracing-and-first-runs:** Merged into main
-- **Session 6, benchmark:** Plan approved, implementing (`docs/specs/benchmark.md`, `docs/plans/benchmark-plan.md`)
+- **Session 6, benchmark:** Implemented, next: `/test benchmark`, then `/code-review` (`docs/specs/benchmark.md`, `docs/plans/benchmark-plan.md`, decisions D32-D39). Smoke pass `smoke-2` (3 tasks, `gpt-oss:120b-cloud`, `MAX_REPLANS=1`): 3/3 success, resume skipped all 3. Finding for session 7: file-02 passed but cost 6 step retries and 1 replan, because the planner splits read/extract/return into 3 steps and the critic rejects steps without a tool call (first-run problem P2 again). Before any full pass: keep `MAX_REPLANS=1` in `.env`.
 
 ## Done
 - [x] Project folder and `.claude/` skeleton
