@@ -2,7 +2,7 @@
 
 **Spec:** docs/specs/streamlit-ui.md
 **Branch:** feature/streamlit-ui
-**Status:** Waiting for approval
+**Status:** Approved
 
 ## Progress
 - [ ] Step 1: dependencies, Streamlit config, and a feasibility check
