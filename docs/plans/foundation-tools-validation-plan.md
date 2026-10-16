@@ -11,7 +11,7 @@
 - [x] Step 4: Tool result base (`src/tools/base.py`)
 - [x] Step 5: Calculator
 - [x] Step 6: File tools
-- [ ] Step 7: Web search
+- [x] Step 7: Web search
 - [ ] Step 8: Tool registry
 - [ ] Step 9: Validation gate (`src/validation.py`)
 - [ ] Step 10: Docs sync and final checks
