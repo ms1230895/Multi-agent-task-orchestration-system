@@ -11,7 +11,7 @@
 - [x] Step 4: `ui/render.py` (safe HTML timeline)
 - [x] Step 5: `ui/live.py` (`RunManager`, `live_settings`)
 - [x] Step 6: `ui/data.py` (traces and passes from disk)
-- [ ] Step 7: `ui/charts.py` (three Plotly figures)
+- [x] Step 7: `ui/charts.py` (three Plotly figures)
 - [ ] Step 8: `ui/app.py`, trace explorer and dashboard pages (replay-only works)
 - [ ] Step 9: the Run page (live mode)
 - [ ] Step 10: docs and decisions
