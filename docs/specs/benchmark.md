@@ -27,7 +27,7 @@ Architecture layer: 7 (Benchmark, `benchmark/`), on top of layer 6 (`run_task`).
 - `benchmark/checkers.py` (new): number extraction, the 4 check types, and `run_checks()`.
 - `benchmark/runner.py` (new): workspace reset, pass folders, manifest, resume, mismatch refusal, infrastructure-error pause, results, summary, and the CLI.
 - Fixes for first-run problems P4 (file tasks create their input files before the task) and P5 (numbers with thousands separators are accepted).
-- One real smoke pass (`smoke-1`, 3 tasks) with `gpt-oss:120b-cloud`.
+- One real smoke pass (`smoke-2`, 3 tasks) with `gpt-oss:120b-cloud`.
 - Docs: `docs/specs/architecture.md` (section 2.7 and 5: the `checks` list, the success rule, `paused.jsonl`, the code fingerprint), `docs/plans/decisions.md`, CLAUDE.md (benchmark command), `docs/project-memory.md` (benchmark command).
 - Unit tests, fully mocked.
 
@@ -254,7 +254,7 @@ Known weak spots, accepted on purpose and listed for session 7: the model knows 
 6. **For each remaining task**, in file order:
    1. `prepare_workspace(task, workspace)`.
    2. `state = run_fn(task.task, settings=settings, on_record=collect)`. `collect` keeps the `run_end` record and the names of the tools in `tool_call` records; with `--verbose` it also calls `print_record`.
-   3. If `is_infra_error(state["error"])`: append a line to `paused.jsonl`, print `paused: <error>. Resume later with: python -m benchmark.runner --pass <pass_id>`, and stop with outcome `paused` (exit 3). No result is written, so the task runs again on resume.
+   3. If `is_infra_error(state["error"])`: append a line to `paused.jsonl` (error text redacted, see D40), print `paused at <id> (pause N of 3 for this task): <error>. Resume later with: python -m benchmark.runner --pass <pass_id>`, and stop with outcome `paused` (exit 3). No result is written, so the task runs again on resume. **Exception (added after the code review):** on the third pause for the same task and error type (`MAX_TASK_PAUSES`), the run is recorded as a normal failed result with its `error` kept, so a deterministic server error cannot block a pass forever.
    4. If the `run_end` model differs from the manifest model: stop with an error (exit 2). **Why:** this should never happen; if it does, the pass would be mixed.
    5. Otherwise run the checks, build the result line (4, section 4), append it to `results.jsonl` and flush. Print one line: `[3/30] calc-03 PASS 8.6 s` (or `FAIL`, with the first failed check's detail).
 7. When no task is left: print the summary, outcome `complete` (exit 0).
@@ -282,7 +282,7 @@ These are the exact metric definitions of architecture section 5; session 7 comp
 ### 5.7 The smoke pass
 Gaurav sets `.env` (Claude never reads it, Hard rule 7) and runs:
 ```
-python -m benchmark.runner --pass smoke-1 --tasks calc-01,search-01,file-02
+python -m benchmark.runner --pass smoke-2 --tasks calc-01,search-01,file-02
 ```
 Done when it completes with 3 result lines, a manifest with `model == "gpt-oss:120b-cloud"`, and 3 traces in `logs/`. A task that fails is fine and is written down. Then Gaurav runs it once more, to see that a finished pass skips all 3 tasks and makes no LLM call.
 
@@ -339,7 +339,7 @@ Done when it completes with 3 result lines, a manifest with `model == "gpt-oss:1
 - [x] AC36: `ruff check .` reports no errors.
 
 **Real smoke pass** (not a unit test; checked by code over the files)
-- [x] AC37: `benchmark/results/smoke-1/` has a manifest with `model == "gpt-oss:120b-cloud"` and 3 result lines; each `run_id` has a trace in `logs/` whose every line has that model and whose last line is the only `run_end`.
+- [x] AC37: `benchmark/results/smoke-2/` has a manifest with `model == "gpt-oss:120b-cloud"` and 3 result lines; each `run_id` has a trace in `logs/` whose every line has that model and whose last line is the only `run_end`.
 - [x] AC38: A second run of the same command prints that all tasks are done, adds no result line and creates no new trace.
 - [x] AC39: CLAUDE.md "Commands" and `docs/project-memory.md` contain `python -m benchmark.runner --pass <pass_id>`.
 

@@ -14,7 +14,7 @@
 - [x] Step 7: The task loop: results, pause, crashes (runner, part 3)
 - [x] Step 8: Summary and CLI (runner, part 4)
 - [x] Step 9: Docs sync
-- [x] Step 10: Real smoke pass `smoke-1`
+- [x] Step 10: Real smoke pass (done as `smoke-2`)
 
 ## Overview
 Build bottom-up, pure code first. First the text helpers (number extraction and normalising), which both the task validation and the checkers need. Then the task schema, the checkers, and the real task file, checked against hand-written answers. Then the runner in four parts: workspace, pass setup, task loop, summary and CLI. Each part is checked with a short `python -` script using a fake `run_fn`, `tmp_path`-style temp folders and `load_settings({...})` with a dummy model (no LLM, no network), plus `ruff check`. The full test suite is written afterwards with `/test`. The real smoke pass comes last.
@@ -132,10 +132,10 @@ Checked while planning: the Ollama client turns `httpx.ConnectError` into `Conne
 - **Covers:** AC39
 
 ### Step 10: Real smoke pass `smoke-1` (done as `smoke-2`)
-- **Files:** `benchmark/results/smoke-1/` (new, committed), `docs/plans/progress.md`
+- **Files:** `benchmark/results/smoke-2/` (new, committed), `docs/plans/progress.md`
 - **What:**
   1. Gaurav sets `MAX_REPLANS=1` in `.env` and checks `OLLAMA_MODEL=gpt-oss:120b-cloud` (Claude never reads `.env`, Hard rule 7).
-  2. Gaurav runs `python -m benchmark.runner --pass smoke-1 --tasks calc-01,search-01,file-02`.
+  2. Gaurav runs `python -m benchmark.runner --pass smoke-2 --tasks calc-01,search-01,file-02`.
   3. Claude checks the files by code: manifest model, 3 result lines, each `run_id`'s trace (model on every line, one `run_end` as the last line).
   4. Gaurav runs the same command again: it must say all tasks are done, add no line, and create no trace (compare the `logs/` file count before and after).
   5. Results (pass/fail per task, anything odd) are noted in `progress.md`; a failure is written down honestly, not fixed by editing expected answers (Hard rule 6). Problems go to session 7 unless they are runner bugs.

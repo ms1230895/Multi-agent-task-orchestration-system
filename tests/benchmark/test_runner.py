@@ -1339,3 +1339,203 @@ def test_docs_contain_the_benchmark_command(doc: str) -> None:
     # WHY: Gaurav looks the command up there.
     text = (PROJECT_ROOT / doc).read_text(encoding="utf-8")
     assert "python -m benchmark.runner --pass <pass_id>" in text
+
+
+# --- Code-review fixes: symlinked workspace, manifest types, redaction, repeated pauses ---
+
+
+def test_reset_workspace_refuses_a_workspace_that_is_a_symlink(tmp_path: Path) -> None:
+    """Review W1: a linked sandbox is refused and the folder it points to is untouched."""
+    # WHY: `iterdir()` follows a symlinked folder, so without the guard this would empty the
+    # victim folder.
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    (victim / "keep.txt").write_text("precious", encoding="utf-8")
+    link = tmp_path / "workspace"
+    os.symlink(victim, link)
+    with pytest.raises(ValueError, match="symlink"):
+        reset_workspace(link)
+    assert (victim / "keep.txt").read_text(encoding="utf-8") == "precious"
+
+
+def test_run_pass_refuses_a_symlinked_workspace_before_creating_anything(
+    env: Env, tmp_path: Path
+) -> None:
+    """Review W1: the pass is refused up front, no folder is made, nothing is deleted."""
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    (victim / "keep.txt").write_text("precious", encoding="utf-8")
+    env.workspace.rename(tmp_path / "old-workspace")
+    os.symlink(victim, env.workspace)
+    fake = env.fake()
+    with pytest.raises(PassRefused, match="symlink"):
+        env.run(fake=fake)
+    assert fake.calls == []
+    assert not env.pass_dir().exists()
+    assert (victim / "keep.txt").read_text(encoding="utf-8") == "precious"
+
+
+GOOD_MANIFEST: dict[str, Any] = {
+    "model": "m",
+    "config": {},
+    "code_fingerprint": "sha256:x",
+    "task_ids": ["calc-01"],
+}
+
+
+@pytest.mark.parametrize(
+    "broken",
+    [
+        {**GOOD_MANIFEST, "task_ids": [["x"]]},
+        {**GOOD_MANIFEST, "task_ids": [1]},
+        {**GOOD_MANIFEST, "task_ids": 5},
+        {**GOOD_MANIFEST, "model": 7},
+        {**GOOD_MANIFEST, "config": []},
+        {**GOOD_MANIFEST, "code_fingerprint": None},
+        {k: v for k, v in GOOD_MANIFEST.items() if k != "task_ids"},
+        ["not", "a", "dict"],
+    ],
+)
+def test_read_manifest_wrong_types_are_refused_not_crashes(tmp_path: Path, broken: Any) -> None:
+    """Review W2: a manifest with wrong types gives PassRefused, never a TypeError."""
+    # WHY: a manifest can come from git, so it is untrusted data.
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps(broken), encoding="utf-8")
+    with pytest.raises(PassRefused):
+        runner._read_manifest(path)
+
+
+def test_read_manifest_good_manifest_is_returned(tmp_path: Path) -> None:
+    """Review W2: the type checks do not refuse a valid manifest."""
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps(GOOD_MANIFEST), encoding="utf-8")
+    assert runner._read_manifest(path) == GOOD_MANIFEST
+
+
+def test_read_manifest_deeply_nested_json_is_refused(tmp_path: Path) -> None:
+    """Review W2: `RecursionError` from `json.loads` becomes a refusal."""
+    path = tmp_path / "manifest.json"
+    path.write_text("[" * 200_000, encoding="utf-8")
+    with pytest.raises(PassRefused):
+        runner._read_manifest(path)
+
+
+def test_read_results_deeply_nested_line_is_refused(tmp_path: Path) -> None:
+    """Review W2: a deeply nested results line is a refusal naming the line."""
+    path = tmp_path / "results.jsonl"
+    path.write_text("[" * 200_000 + "\n", encoding="utf-8")
+    with pytest.raises(PassRefused, match="line 1"):
+        _read_results(path)
+
+
+def test_resume_with_a_crafted_manifest_is_refused_not_a_traceback(env: Env) -> None:
+    """Review W2: a resume of a pass whose manifest has bad task ids is a clean refusal."""
+    env.run()
+    manifest_path = env.pass_dir() / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["task_ids"] = [["calc-01"]]
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    fake = env.fake()
+    with pytest.raises(PassRefused):
+        env.run(fake=fake)
+    assert fake.calls == []
+
+
+def test_redact_removes_project_folder_home_folder_and_url_queries() -> None:
+    """Review W3: local paths and URL query strings do not survive."""
+    home = str(Path.home())
+    text = (
+        f"failed in {PROJECT_ROOT}/src/x.py and {home}/Documents/y.txt, "
+        "see https://example.com/api/v1?token=SECRET123&b=2 and https://example.com/plain"
+    )
+    cleaned = runner._redact(text)
+    assert str(PROJECT_ROOT) not in cleaned
+    assert "SECRET123" not in cleaned
+    assert "<project>/src/x.py" in cleaned
+    assert "~/Documents/y.txt" in cleaned
+    assert "https://example.com/api/v1?<redacted>" in cleaned
+    # WHY: a URL without a query is useful for debugging and is kept.
+    assert "https://example.com/plain" in cleaned
+
+
+def test_redact_leaves_plain_text_unchanged() -> None:
+    """Review W3: text without paths or queries is returned as it is."""
+    assert runner._redact("KeyError: 'plan'") == "KeyError: 'plan'"
+
+
+def test_result_line_and_paused_line_are_redacted(env: Env) -> None:
+    """Review W3: the saved error, final answer and paused error hold no path or token."""
+    leak = f"at {PROJECT_ROOT}/a.py via https://h.example/p?key=SECRET123"
+    env.run(
+        fake=env.fake(
+            {
+                "calc-01": {"status": "failed", "error": f"KeyError: {leak}", "answer": leak},
+                "file-01": {"status": "failed", "error": f"ResponseError: {leak}"},
+            }
+        )
+    )
+    saved = (env.pass_dir() / "results.jsonl").read_text(encoding="utf-8")
+    paused = (env.pass_dir() / "paused.jsonl").read_text(encoding="utf-8")
+    for text in (saved, paused):
+        assert "SECRET123" not in text
+        assert str(PROJECT_ROOT) not in text
+    assert "<project>" in saved
+    assert "<project>" in paused
+
+
+def test_same_task_paused_three_times_is_recorded_as_a_failed_task(env: Env) -> None:
+    """Review W6: the third pause for one task and error type becomes a failed result."""
+    # WHY: a deterministic server error must not block the pass and burn quota forever.
+    cap = {"calc-01": {"status": "failed", "error": USAGE_CAP}}
+    assert runner.MAX_TASK_PAUSES == 3
+    assert env.run(fake=env.fake(cap)) == "paused"
+    assert env.run(fake=env.fake(cap)) == "paused"
+    assert env.results() == []
+    assert env.run(fake=env.fake(cap)) == "complete"
+    results = env.results()
+    assert [r["task_id"] for r in results] == IDS
+    assert results[0]["success"] is False
+    assert results[0]["error"] == USAGE_CAP
+    assert len(_jsonl(env.pass_dir() / "paused.jsonl")) == 3
+
+
+def test_pause_count_is_per_task_and_error_type(env: Env) -> None:
+    """Review W6: a different error type starts a new count, so the pass pauses again."""
+    cap = {"calc-01": {"status": "failed", "error": USAGE_CAP}}
+    down = {"calc-01": {"status": "failed", "error": "ConnectionError: down"}}
+    assert env.run(fake=env.fake(cap)) == "paused"
+    assert env.run(fake=env.fake(cap)) == "paused"
+    assert env.run(fake=env.fake(down)) == "paused"
+    assert env.results() == []
+
+
+def test_pause_message_shows_the_pause_count(env: Env, capsys: pytest.CaptureFixture[str]) -> None:
+    """Review W6: the terminal shows how many times this task has paused the pass."""
+    env.run(fake=env.fake({"calc-01": {"status": "failed", "error": USAGE_CAP}}))
+    out = " ".join(capsys.readouterr().out.split())
+    assert "pause 1 of 3" in out
+
+
+def test_count_pauses_skips_broken_lines_and_other_tasks(tmp_path: Path) -> None:
+    """Review W6: only matching, readable lines are counted."""
+    path = tmp_path / "paused.jsonl"
+    lines = [
+        json.dumps({"task_id": "calc-01", "error": "ResponseError: a"}),
+        "not json",
+        json.dumps({"task_id": "calc-01", "error": "ConnectionError: b"}),
+        json.dumps({"task_id": "file-01", "error": "ResponseError: c"}),
+        json.dumps(["not", "a", "dict"]),
+    ]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    assert runner._count_pauses(path, "calc-01", "ResponseError") == 1
+    assert runner._count_pauses(path, "calc-01", "ConnectionError") == 1
+    assert runner._count_pauses(path, "none-00", "ResponseError") == 0
+    assert runner._count_pauses(tmp_path / "missing.jsonl", "calc-01", "ResponseError") == 0
+
+
+def test_benchmark_source_uses_only_the_allowed_comment_tags() -> None:
+    """Review W4: no invented tags such as `# RISK:` (colour-coding rule)."""
+    allowed = {"WHY", "NOTE", "STEP", "TODO", "WARNING"}
+    for path in sorted((PROJECT_ROOT / "benchmark").glob("*.py")):
+        tags = set(re.findall(r"#\s([A-Z]{3,})(?: \d+)?:", path.read_text(encoding="utf-8")))
+        assert tags <= allowed, (path.name, tags - allowed)

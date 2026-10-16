@@ -55,6 +55,15 @@ GIT_TIMEOUT_S = 10
 MAX_RESULT_ANSWER_CHARS = 500
 MAX_TOOL_NAME_CHARS = 100
 
+# WHY: a task that always ends in an infrastructure error (for example a server 500 on one
+# prompt) would pause every resume and spend quota forever, and would never get a result. After
+# this many pauses for the same task and error type it is recorded as a failed task instead.
+MAX_TASK_PAUSES = 3
+
+# WHY: result and paused lines are committed to git (D37). Exception text from httpx or Ollama
+# can hold local paths or URLs with tokens in the query string, so both are removed first.
+_URL_WITH_QUERY = re.compile(r"(https?://[^\s?#]+)\?\S+")
+
 PassOutcome = Literal["complete", "paused"]
 # NOTE: same call shape as `src.run.run_task`; tests pass a fake with scripted states.
 RunFn = Callable[..., AgentState]
@@ -64,7 +73,7 @@ RunFn = Callable[..., AgentState]
 # (architecture 5, D12, D24). The Ollama client turns `httpx.ConnectError` into
 # `ConnectionError` and raises `ResponseError` for every server answer that is an error
 # (usage cap, rate limit, not signed in, server error); httpx timeouts pass through.
-# RISK: a guess from reading the client code (like D6). The first real usage cap will show
+# WARNING: a guess from reading the client code (like D6). The first real usage cap will show
 # the real text in `paused.jsonl`; adjust this list then.
 INFRA_ERROR_TYPES = frozenset(
     {
@@ -107,7 +116,15 @@ def reset_workspace(workspace: Path) -> None:
     touched, so a link the agent could not create (Hard rule 4) still cannot make us delete
     something outside the workspace. A failure raises on purpose: carrying on with a dirty
     workspace would silently mix tasks.
+
+    Raises:
+        ValueError: if `workspace` itself is a symlink. `iterdir()` would follow it and delete
+            the contents of whatever folder it points to.
     """
+    # WHY: entries inside are handled as links, but the folder itself is not; a sandbox linked
+    # to another folder (for example `~/Documents`) would be emptied.
+    if workspace.is_symlink():
+        raise ValueError("workspace must be a real folder, not a symlink")
     workspace.mkdir(parents=True, exist_ok=True)
     for entry in workspace.iterdir():
         if entry.name == KEEP_FILE:
@@ -270,13 +287,27 @@ def _write_manifest(path: Path, manifest: dict[str, Any]) -> None:
 
 def _read_manifest(path: Path) -> dict[str, Any]:
     """Read a pass's manifest, or refuse if it is missing or broken."""
+    # WHY: `RecursionError` is what `json.loads` raises for deeply nested input, and it is not a
+    # `ValueError`. A manifest can come from git, so it is read as untrusted data.
     try:
         manifest = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         raise PassRefused(f"{MANIFEST_NAME} is missing or not valid JSON") from None
-    required = ("model", "config", "code_fingerprint", "task_ids")
-    if not isinstance(manifest, dict) or any(key not in manifest for key in required):
+    if not isinstance(manifest, dict):
         raise PassRefused(f"{MANIFEST_NAME} is missing required fields")
+    # WHY: wrong types would otherwise crash later with a traceback (for example a task id
+    # that is not a string breaks the unknown-id check) instead of a clean refusal.
+    expected_types: dict[str, type] = {
+        "model": str,
+        "code_fingerprint": str,
+        "config": dict,
+        "task_ids": list,
+    }
+    for key, kind in expected_types.items():
+        if not isinstance(manifest.get(key), kind):
+            raise PassRefused(f"{MANIFEST_NAME}: '{key}' is missing or has the wrong type")
+    if not all(isinstance(task_id, str) for task_id in manifest["task_ids"]):
+        raise PassRefused(f"{MANIFEST_NAME}: 'task_ids' must be a list of strings")
     return manifest
 
 
@@ -327,7 +358,7 @@ def _read_results(path: Path) -> list[dict[str, Any]]:
             continue
         try:
             record = json.loads(line)
-        except ValueError:
+        except (ValueError, RecursionError):
             record = None
         if not isinstance(record, dict) or not isinstance(record.get("task_id"), str):
             raise PassRefused(
@@ -394,6 +425,42 @@ class _RunCollector:
             print_record(record)
 
 
+def _redact(text: str) -> str:
+    """Remove local paths and URL query strings from text that is about to be saved.
+
+    Args:
+        text: an error message or answer from a run.
+
+    Returns:
+        The text with the project folder as `<project>`, the home folder as `~`, and
+        `https://host/path?token=...` as `https://host/path?<redacted>`.
+
+    WHY: results are committed to git (D37) and exception text is not under our control.
+    """
+    # WHY: the project folder first, because it usually lies inside the home folder.
+    for private, label in ((str(PROJECT_ROOT), "<project>"), (str(Path.home()), "~")):
+        if len(private) > 1:
+            text = text.replace(private, label)
+    return _URL_WITH_QUERY.sub(r"\1?<redacted>", text)
+
+
+def _count_pauses(path: Path, task_id: str, error_type: str) -> int:
+    """Count the lines in `paused.jsonl` for one task and error type. Broken lines are skipped."""
+    if not path.exists():
+        return 0
+    count = 0
+    for line in path.read_text(encoding="utf-8").split("\n"):
+        try:
+            record = json.loads(line)
+        except (ValueError, RecursionError):
+            continue
+        if not isinstance(record, dict) or record.get("task_id") != task_id:
+            continue
+        if str(record.get("error", "")).split(":", 1)[0].strip() == error_type:
+            count += 1
+    return count
+
+
 def _append_line(path: Path, record: dict[str, Any]) -> None:
     """Append one JSON line and close the file.
 
@@ -429,8 +496,8 @@ def _result_line(
         "status": state["status"],
         "checks_passed": checks_passed,
         "checks": [check.model_dump() for check in checks],
-        "error": state["error"],
-        "final_answer": trim(state["final_answer"], MAX_RESULT_ANSWER_CHARS),
+        "error": _redact(state["error"]),
+        "final_answer": trim(_redact(state["final_answer"]), MAX_RESULT_ANSWER_CHARS),
         "tools_used": tools_used,
         "counters": dict(data.get("counters", {})),
         "duration_ms": data.get("duration_ms", 0),
@@ -496,6 +563,9 @@ def run_pass(
     # STEP 1: check everything that can be refused BEFORE a folder is created, so a refusal
     # leaves no trace on disk.
     _check_pass_id(pass_id)
+    # WHY: the workspace is emptied before every task; refuse a linked sandbox up front.
+    if workspace.is_symlink():
+        raise PassRefused("the workspace folder is a symlink; refusing to empty it")
     if settings is None:
         settings = get_settings()
     tasks = load_tasks(tasks_path)
@@ -557,21 +627,33 @@ def run_pass(
         # WHY: a usage cap or connection error says nothing about the agent. Write no result,
         # so the task runs again on resume (architecture 5).
         if is_infra_error(state["error"]):
+            paused_path = pass_dir / PAUSED_NAME
+            error_type = state["error"].split(":", 1)[0].strip()
+            pauses = _count_pauses(paused_path, task.id, error_type) + 1
             _append_line(
-                pass_dir / PAUSED_NAME,
+                paused_path,
                 {
                     "task_id": task.id,
                     "run_id": state["run_id"],
-                    "error": state["error"],
+                    "error": _redact(state["error"]),
                     "at": _timestamp(),
                 },
             )
+            if pauses < MAX_TASK_PAUSES:
+                _say(
+                    f"paused at {task.id} (pause {pauses} of {MAX_TASK_PAUSES} for this task): "
+                    f"{state['error']}. "
+                    f"Resume later with: python -m benchmark.runner --pass {pass_id}",
+                    RETRY,
+                )
+                return "paused"
+            # WHY: the same task paused the pass too often. Carry on below and record it as a
+            # failed task, with its error kept, so a deterministic server error cannot block
+            # the pass forever and the summary still shows it (`crashed`).
             _say(
-                f"paused at {task.id}: {state['error']}. "
-                f"Resume later with: python -m benchmark.runner --pass {pass_id}",
+                f"{task.id} paused {pauses} times with {error_type}: recording it as a failed task",
                 RETRY,
             )
-            return "paused"
 
         # WHY: `run_task` always writes a `run_end`; without one the model and counters are
         # unknown, and a result without them would be unreliable evidence.
