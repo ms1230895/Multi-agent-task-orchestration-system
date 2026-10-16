@@ -19,9 +19,14 @@ from src.tools.base import ToolResult, failure, success
 
 MAX_EXPRESSION_CHARS = 200
 MAX_EXPONENT = 100
+# WHY: `round(n, -k)` makes Python build 10 ** k internally, so a huge k freezes the run
+# (Hard rule 5). It took 8 s for k = 10 million. Real use needs only a few digits.
+MAX_ROUND_DIGITS = 100
 # WHY: Python ints grow without limit; a tiny expression could otherwise build a number
-# with millions of digits and freeze the run (Hard rule 5).
-MAX_INT_BITS = 100_000
+# with millions of digits and freeze the run (Hard rule 5). NOTE: about 14 000 bits is the
+# point where Python refuses to turn an int into text (4300 digits), so larger results
+# could never be shown anyway.
+MAX_INT_BITS = 14_000
 
 _BINARY_OPS: dict[type[ast.operator], Callable[[Any, Any], Any]] = {
     ast.Add: operator.add,
@@ -147,6 +152,9 @@ def _evaluate(node: ast.AST) -> Any:
         if node.keywords:
             raise _CalcError("keyword arguments are not allowed")
         args = [_evaluate(arg) for arg in node.args]
+        # WARNING: check round's digits before calling it; the work happens inside round.
+        if node.func.id == "round" and len(args) == 2 and abs(args[1]) > MAX_ROUND_DIGITS:
+            raise _CalcError("round digits out of range")
         return _check_number(_FUNCTIONS[node.func.id](*args))
 
     raise _CalcError(f"not allowed: {type(node).__name__}")

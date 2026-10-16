@@ -179,3 +179,39 @@ def test_web_search_result_missing_fields_does_not_raise() -> None:
     result = web_search("q")
     assert result["ok"] is True
     assert "1. " in (result["output"] or "")
+
+
+@pytest.mark.parametrize(
+    ("query", "max_results"),
+    [("", 3), ("q" * 301, 3), (5, 3), ("q", 0), ("q", 11), ("q", True), ("q", "3"), ("q", 2.5)],
+)
+def test_web_search_bad_input_is_rejected_by_the_tool_without_searching(
+    query: Any, max_results: Any
+) -> None:
+    """With validation off the tool checks its own input and never reaches ddgs."""
+    # WHY: the ablation baseline passes raw arguments; bad ones must not hit the network.
+    FakeDDGS.results = [_result(1)]
+    result = web_search(query, max_results)
+    assert result["ok"] is False
+    assert result["output"] is None
+    assert FakeDDGS.text_calls == []
+
+
+def test_web_search_error_message_has_urls_removed_and_is_trimmed() -> None:
+    """Catch-all errors hide URLs (a proxy URL may hold a password) and are cut to 200 chars."""
+    # WHY: the message goes to the LLM and into the trace.
+    FakeDDGS.error = ValueError("failed via https://user:secret@proxy.local:8080/x " + "z" * 500)
+    result = web_search("q")
+    error = result["error"] or ""
+    assert result["ok"] is False
+    assert "secret" not in error and "proxy.local" not in error
+    assert "<url>" in error
+    assert len(error) <= len("ValueError: ") + web_search_module.MAX_ERROR_CHARS + 1
+
+
+def test_web_search_transient_detection_uses_the_original_message_not_the_cleaned_one() -> None:
+    """A rate-limit hint is still found when the message also contains a URL."""
+    # WHY: cleaning the message for display must not break the retry decision.
+    FakeDDGS.error = DDGSException("HTTP 429 from https://example.com/search")
+    result = web_search("q")
+    assert (result["error"] or "").startswith(TRANSIENT_PREFIX)

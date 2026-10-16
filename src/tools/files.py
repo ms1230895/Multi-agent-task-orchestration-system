@@ -15,6 +15,9 @@ from src import config
 from src.tools.base import ToolResult, failure, success
 
 MAX_FILE_CHARS = 100_000
+# WHY: read and write use the same unit (bytes on disk). Otherwise a file of multi-byte
+# characters could be written but then refused when read back.
+MAX_FILE_BYTES = 100_000
 MAX_PATH_CHARS = 255
 
 
@@ -85,8 +88,8 @@ def read_file(path: str) -> ToolResult:
         if not target.is_file():
             return failure("file not found (or not a regular file)")
         # WHY: size cap so one huge file cannot fill the LLM's context.
-        if target.stat().st_size > MAX_FILE_CHARS:
-            return failure(f"file too large (limit {MAX_FILE_CHARS} bytes)")
+        if target.stat().st_size > MAX_FILE_BYTES:
+            return failure(f"file too large (limit {MAX_FILE_BYTES} bytes)")
         try:
             return success(target.read_bytes().decode("utf-8"))
         except UnicodeDecodeError:
@@ -97,7 +100,8 @@ def read_file(path: str) -> ToolResult:
         # WHY: the class name only; OS messages contain full local paths.
         return failure(f"could not read file: {type(exc).__name__}")
     except Exception as exc:  # WHY: last safety net, so no input can make a tool raise
-        return failure(f"{type(exc).__name__}: {exc}")
+        # WHY: the class name only, like the OSError case; the message could hold a local path.
+        return failure(f"unexpected error: {type(exc).__name__}")
 
 
 def write_file(path: str, content: str) -> ToolResult:
@@ -125,6 +129,9 @@ def write_file(path: str, content: str) -> ToolResult:
             data = content.encode("utf-8")
         except UnicodeEncodeError:
             return failure("content cannot be encoded as UTF-8")
+        # WHY: the size on disk is what `read_file` limits, so check bytes after encoding.
+        if len(data) > MAX_FILE_BYTES:
+            return failure(f"content too large (limit {MAX_FILE_BYTES} bytes)")
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
         return success(f"wrote {len(content)} chars to {path}")
@@ -133,4 +140,5 @@ def write_file(path: str, content: str) -> ToolResult:
     except OSError as exc:
         return failure(f"could not write file: {type(exc).__name__}")
     except Exception as exc:  # WHY: last safety net, so no input can make a tool raise
-        return failure(f"{type(exc).__name__}: {exc}")
+        # WHY: the class name only, like the OSError case; the message could hold a local path.
+        return failure(f"unexpected error: {type(exc).__name__}")

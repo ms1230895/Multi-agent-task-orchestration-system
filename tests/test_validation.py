@@ -429,20 +429,25 @@ def test_call_tool_success_emits_exactly_one_tool_call_event(rec: Recorder) -> N
 
 
 @pytest.mark.parametrize(
-    ("name", "args"),
-    [("nope", {}), ("calculator", {"expr": "1"}), ("calculator", {"expression": "1/0"})],
+    ("name", "args", "expected_attempts"),
+    [
+        ("nope", {}, 0),
+        ("calculator", {"expr": "1"}, 0),
+        ("calculator", {"expression": "1/0"}, 1),
+    ],
 )
 def test_call_tool_failure_emits_exactly_one_tool_call_event_with_error(
-    rec: Recorder, name: str, args: dict[str, Any]
+    rec: Recorder, name: str, args: dict[str, Any], expected_attempts: int
 ) -> None:
     """AC32: unknown tool, validation error and tool error each emit one tool_call event."""
-    # WHY: failures are what the benchmark counts.
+    # WHY: failures are what the benchmark counts. The tool never ran for the first two,
+    # so attempts is 0; the third ran once.
     call_tool(name, args, settings=make_settings(), sleep=rec.sleep, on_event=rec.on_event)
     events = rec.named("tool_call")
     assert len(events) == 1
     _assert_tool_call_event_shape(events[0])
     assert events[0]["ok"] is False
-    assert events[0]["attempts"] in (0, 1)
+    assert events[0]["attempts"] == expected_attempts
 
 
 def test_call_tool_retries_emit_single_tool_call_event_with_attempts_count(
@@ -476,9 +481,46 @@ def test_call_tool_event_args_and_output_are_trimmed(
         on_event=rec.on_event,
     )
     data = rec.named("tool_call")[0]
-    # NOTE: the cut text gets one extra "…" character, so the limit is 500 + 1.
-    assert len(data["output"]) <= 501
-    assert len(data["args"]["text"]) < 500
+    # WHY: exact lengths, so a cut that adds the "…" on top of the limit would fail.
+    assert len(data["output"]) == validation.MAX_LOGGED_CHARS == 500
+    assert len(data["args"]["text"]) == validation.MAX_LOGGED_ARG_CHARS == 200
+    assert data["output"].endswith("…")
+
+
+def test_call_tool_long_error_is_trimmed_to_exactly_the_limit(
+    monkeypatch: pytest.MonkeyPatch, rec: Recorder
+) -> None:
+    """AC32: a long error text is cut to 500 characters in total in the event."""
+    # WHY: the error path trims separately from the output path.
+    register(monkeypatch, lambda: failure("e" * 5000))
+    call_tool("fake", {}, settings=make_settings(), sleep=rec.sleep, on_event=rec.on_event)
+    assert len(rec.named("tool_call")[0]["error"]) == 500
+
+
+@pytest.mark.parametrize("bad_name", [["calculator"], {"a": 1}, 5, None])
+def test_call_tool_non_string_name_returns_error_and_does_not_raise(
+    rec: Recorder, bad_name: Any
+) -> None:
+    """Hard rule 1: a list, dict or number as the tool name is an error result, not a crash."""
+    # WHY: a list or dict is unhashable and used to raise TypeError inside `TOOLS.get`.
+    result = call_tool(
+        bad_name, {}, settings=make_settings(), sleep=rec.sleep, on_event=rec.on_event
+    )
+    assert result == {"ok": False, "output": None, "error": "tool name must be a string"}
+    events = rec.named("tool_call")
+    assert len(events) == 1
+    assert events[0]["attempts"] == 0
+
+
+def test_call_tool_long_unknown_name_is_trimmed_in_error_and_event(rec: Recorder) -> None:
+    """The LLM-chosen name is cut to 100 characters where it is shown or logged."""
+    # WHY: an unbounded name would put an unbounded string into the LLM's context and the trace.
+    result = call_tool(
+        "x" * 5000, {}, settings=make_settings(), sleep=rec.sleep, on_event=rec.on_event
+    )
+    assert result["ok"] is False
+    assert len(result["error"] or "") < 300
+    assert len(rec.named("tool_call")[0]["tool"]) == validation.MAX_LOGGED_NAME_CHARS
 
 
 def test_call_tool_on_event_raising_does_not_change_result(

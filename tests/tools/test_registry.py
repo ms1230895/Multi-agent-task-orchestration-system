@@ -17,14 +17,18 @@ from src.tools import web_search as web_search_module
 EXPECTED_NAMES = {"calculator", "read_file", "write_file", "web_search"}
 
 
-class _RaisingDDGS:
-    """Fake DDGS whose search always fails; keeps tests offline."""
+class _OneResultDDGS:
+    """Fake DDGS whose search always succeeds; keeps tests offline.
+
+    WHY: it must succeed. If it raised, a bad web_search call would return ok=False even
+    without the tool's own input checks, and the AC8 rows would test nothing.
+    """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         pass
 
     def text(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
-        raise ValueError("bad input")
+        return [{"title": "t", "href": "https://example.com", "body": "b"}]
 
 
 @pytest.fixture(autouse=True)
@@ -34,7 +38,7 @@ def _sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     ws = tmp_path / "workspace"
     ws.mkdir()
     monkeypatch.setattr(config, "WORKSPACE_DIR", ws)
-    monkeypatch.setattr(web_search_module, "DDGS", _RaisingDDGS)
+    monkeypatch.setattr(web_search_module, "DDGS", _OneResultDDGS)
 
 
 def test_registry_has_exactly_four_tool_names() -> None:
@@ -70,6 +74,7 @@ _BAD_CALLS: list[tuple[str, dict[str, Any], dict[str, Any]]] = [
     ("web_search", {"query": 5}, {"query": 5}),
     ("web_search", {"query": ""}, {"query": ""}),
     ("web_search", {"query": "q", "max_results": 0}, {"query": "q", "max_results": 0}),
+    ("web_search", {"query": "q", "max_results": 11}, {"query": "q", "max_results": 11}),
     ("web_search", {"query": "q" * 301}, {"query": "q" * 301}),
 ]
 

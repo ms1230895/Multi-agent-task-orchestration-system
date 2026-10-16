@@ -1,6 +1,7 @@
 """Unit tests for `src/tools/calculator.py` (AC10-AC13)."""
 
 import ast
+import time
 from pathlib import Path
 
 import pytest
@@ -149,3 +150,48 @@ def test_calculator_source_has_no_eval_or_exec_calls() -> None:
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
     }
     assert called.isdisjoint({"eval", "exec", "compile"})
+
+
+def test_calculator_round_with_huge_negative_digits_is_rejected_fast() -> None:
+    """Hard rule 5: `round(1, -100000000)` is refused at once instead of hanging."""
+    # WHY: Python builds 10 ** 100000000 inside round; this took over 20 s before the guard.
+    started = time.perf_counter()
+    result = calculator("round(1, -100000000)")
+    assert time.perf_counter() - started < 1.0
+    assert result == {"ok": False, "output": None, "error": "round digits out of range"}
+
+
+@pytest.mark.parametrize("expression", ["round(1, 101)", "round(1, -101)", "round(1.5, 1000000)"])
+def test_calculator_round_digits_beyond_limit_are_rejected(expression: str) -> None:
+    """Round digits outside -100..100 are rejected, in both directions."""
+    # WHY: the guard must cover positive and negative digits.
+    result = calculator(expression)
+    assert result["ok"] is False
+    assert result["error"] == "round digits out of range"
+
+
+@pytest.mark.parametrize(
+    ("expression", "expected"),
+    [("round(1234, -2)", "1200"), ("round(2.567, 2)", "2.57"), ("round(5.5)", "6")],
+)
+def test_calculator_round_with_normal_digits_still_works(expression: str, expected: str) -> None:
+    """Normal use of round is unchanged by the guard."""
+    # WHY: the fix must not break the common case.
+    assert calculator(expression) == {"ok": True, "output": expected, "error": None}
+
+
+def test_calculator_huge_integer_result_is_rejected_as_too_large() -> None:
+    """Results over MAX_INT_BITS are refused with `result too large`."""
+    # WHY: covers the bit-size guard; ((2**100)**11)**100 would be about 111 000 bits.
+    result = calculator("((2**100)**11)**100")
+    assert result == {"ok": False, "output": None, "error": "result too large"}
+
+
+def test_calculator_largest_allowed_integer_can_be_shown_as_text() -> None:
+    """An integer just under the bit limit converts to text without a Python int-limit error."""
+    # WHY: MAX_INT_BITS must stay below Python's own 4300-digit limit for int-to-text.
+    # (2**100)**100 is 2**10000: about 3000 digits, inside both limits.
+    result = calculator("(2**100)**100")
+    assert result["ok"] is True
+    assert result["output"] == str(2**10000)
+    assert calculator_module.MAX_INT_BITS < 4300 * 3.32

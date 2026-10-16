@@ -20,14 +20,15 @@ from src.tools.base import TRANSIENT_PREFIX, ToolResult, failure, is_transient
 
 MAX_LOGGED_CHARS = 500
 MAX_LOGGED_ARG_CHARS = 200
+MAX_LOGGED_NAME_CHARS = 100
 MAX_BACKOFF_S = 4
 
 EventCallback = Callable[[str, dict[str, Any]], None]
 
 
 def _trim(text: str, limit: int) -> str:
-    """Cut text to `limit` characters, ending with `…` when something was removed."""
-    return text if len(text) <= limit else text[:limit] + "…"
+    """Cut text to at most `limit` characters in total, ending with `…` when cut."""
+    return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
 def _loggable_args(args: Any) -> Any:
@@ -121,11 +122,14 @@ def call_tool(
     settings = settings or get_settings()
     started = time.perf_counter()
     attempts = 0
+    # WHY: the name comes from the LLM, so it may be any type and any length. Make a short
+    # text version once, and use it wherever the name is shown or logged.
+    shown_name = _trim(str(name), MAX_LOGGED_NAME_CHARS)
 
     def finish(result: ToolResult) -> ToolResult:
         """Emit the one `tool_call` event for this call and return the result."""
         data: dict[str, Any] = {
-            "tool": name,
+            "tool": shown_name,
             "args": _loggable_args(args),
             "ok": result["ok"],
             "attempts": attempts,
@@ -139,10 +143,14 @@ def call_tool(
         return result
 
     # STEP 1: does the tool exist?
+    # WHY: a list or dict as the name is unhashable, and `TOOLS.get` would raise TypeError.
+    # The gate must turn bad input into an error result, never an exception (Hard rule 1).
+    if not isinstance(name, str):
+        return finish(failure("tool name must be a string"))
     entry = TOOLS.get(name)
     if entry is None:
         available = ", ".join(sorted(TOOLS))
-        return finish(failure(f"unknown tool: {name}. Available: {available}"))
+        return finish(failure(f"unknown tool: {shown_name}. Available: {available}"))
     schema, function = entry
 
     # STEP 2: are the arguments valid? (only when ENABLE_VALIDATION is on)

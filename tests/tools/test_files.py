@@ -223,3 +223,38 @@ def test_write_file_unencodable_text_fails_without_emptying_file(workspace: Path
     result = write_file("keep.txt", "bad \ud800 text")
     assert result["ok"] is False
     assert read_file("keep.txt")["output"] == "old"
+
+
+def test_write_file_multibyte_content_over_byte_limit_fails_and_writes_nothing(
+    workspace: Path,
+) -> None:
+    """60 000 two-byte characters are under the character limit but over the byte limit."""
+    # WHY: read_file limits bytes, so write_file must too, or the file could not be read back.
+    result = write_file("big.txt", "é" * 60_000)
+    assert result["ok"] is False
+    assert "bytes" in (result["error"] or "")
+    assert not (workspace / "big.txt").exists()
+
+
+def test_write_file_multibyte_content_within_byte_limit_can_be_read_back(
+    workspace: Path,
+) -> None:
+    """49 999 two-byte characters fit the byte limit and round-trip through read_file."""
+    # WHY: anything write_file accepts must be readable again.
+    text = "é" * 49_999
+    assert write_file("ok.txt", text)["ok"] is True
+    assert read_file("ok.txt") == {"ok": True, "output": text, "error": None}
+
+
+def test_file_tools_unexpected_error_message_has_no_exception_text(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The catch-all returns only the exception class name, never text that may hold a path."""
+
+    # WHY: an unexpected error's message could contain a local path.
+    def explode(path: str) -> Path:
+        raise RuntimeError("/Users/someone/private/path")
+
+    monkeypatch.setattr("src.tools.files.resolve_in_workspace", explode)
+    for result in (read_file("a.txt"), write_file("a.txt", "x")):
+        assert result == {"ok": False, "output": None, "error": "unexpected error: RuntimeError"}

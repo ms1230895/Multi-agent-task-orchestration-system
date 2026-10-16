@@ -4,6 +4,7 @@ Architecture layer: 2 (tools). This is the only tool that uses the network, so i
 the main source of transient errors that the validation gate may retry.
 """
 
+import re
 from typing import Any
 
 from ddgs import DDGS
@@ -13,6 +14,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from src.tools.base import TRANSIENT_PREFIX, ToolResult, failure, success
 
 DEFAULT_MAX_RESULTS = 3
+MAX_RESULTS_LIMIT = 10
+MAX_QUERY_CHARS = 300
+MAX_ERROR_CHARS = 200
 SEARCH_TIMEOUT_S = 10
 MAX_SNIPPET_CHARS = 300
 MAX_OUTPUT_CHARS = 2000
@@ -22,6 +26,7 @@ NO_RESULTS_TEXT = "No results found."
 # engine arrives as a plain DDGSException with the engine's message, so we also look for
 # these hints in the text.
 _TRANSIENT_HINTS = ("ratelimit", "rate limit", "429", "timed out", "timeout", "connection")
+_URL_PATTERN = re.compile(r"\w+://\S+")
 
 
 class WebSearchArgs(BaseModel):
@@ -29,8 +34,8 @@ class WebSearchArgs(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    query: str = Field(min_length=1, max_length=300)
-    max_results: int = Field(default=DEFAULT_MAX_RESULTS, ge=1, le=10)
+    query: str = Field(min_length=1, max_length=MAX_QUERY_CHARS)
+    max_results: int = Field(default=DEFAULT_MAX_RESULTS, ge=1, le=MAX_RESULTS_LIMIT)
 
 
 def _trim(text: str, limit: int) -> str:
@@ -99,6 +104,17 @@ def web_search(query: str, max_results: int = DEFAULT_MAX_RESULTS) -> ToolResult
         (Hard rule 1).
     """
     try:
+        # WHY: with ENABLE_VALIDATION off the gate passes raw arguments, so the tool checks
+        # its own input like the calculator and file tools do. Nothing bad reaches the network.
+        if not isinstance(query, str) or not 1 <= len(query) <= MAX_QUERY_CHARS:
+            return failure(f"query must be 1 to {MAX_QUERY_CHARS} characters")
+        if (
+            isinstance(max_results, bool)
+            or not isinstance(max_results, int)
+            or not 1 <= max_results <= MAX_RESULTS_LIMIT
+        ):
+            return failure(f"max_results must be a whole number from 1 to {MAX_RESULTS_LIMIT}")
+
         results = DDGS(timeout=SEARCH_TIMEOUT_S).text(query, max_results=max_results)
         # WHY: an empty search is a valid answer, not a tool failure.
         if not results:
@@ -111,4 +127,7 @@ def web_search(query: str, max_results: int = DEFAULT_MAX_RESULTS) -> ToolResult
         # WHY: tell the gate which failures are temporary, so it retries a timeout but
         # not a bad query.
         prefix = TRANSIENT_PREFIX if _is_transient(exc) else ""
-        return failure(f"{prefix}{type(exc).__name__}: {exc}")
+        # WHY: network errors can contain URLs (a proxy URL may hold a password), and the
+        # message goes back to the LLM and into the trace. Replace URLs and cut the length.
+        message = _URL_PATTERN.sub("<url>", str(exc))
+        return failure(f"{prefix}{type(exc).__name__}: {_trim(message, MAX_ERROR_CHARS)}")

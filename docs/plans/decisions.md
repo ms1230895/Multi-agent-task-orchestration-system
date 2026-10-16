@@ -24,3 +24,15 @@ In `ddgs` 9.16 only timeouts raise `TimeoutException`. `RatelimitException` exis
 
 ### D7. Config limits have upper bounds
 Each limit has a range (for example `MAX_RETRIES` 0 to 5, `OLLAMA_TIMEOUT_S` 1 to 600), and a value outside it stops start-up with a `ConfigError`. **Why:** Hard rule 5 (no run may hang). A typo like `MAX_RETRIES=200` should be refused, not run for hours. The error text names the variable but never shows the value (Hard rule 7).
+
+### D8. Code-review fixes (session 2)
+The `/code-review` found one verified Critical issue and four Warnings. All were fixed, with tests (suite grew from 197 to 227 tests).
+- **`round()` hang (Critical).** `round(1, -N)` makes Python compute `10 ** N`; N = 10 million took 8 s and N = 100 million did not finish in 20 s. The calculator now rejects `round` digits outside -100 to 100 (`MAX_ROUND_DIGITS`). **Why:** Hard rule 5.
+- **Non-string tool name.** `call_tool` returns `tool name must be a string` instead of raising `TypeError` on an unhashable name. The name is also cut to 100 characters wherever it is shown or logged. **Why:** Hard rule 1, and the name is LLM-controlled.
+- **`web_search` checks its own input** (query length, `max_results` 1 to 10, no bool), like the other tools. **Why:** with `ENABLE_VALIDATION=false`, raw arguments reach the tool, and the ablation baseline must not send bad calls to the network.
+- **`_trim` returns exactly the limit** (500 in total, not 501), as the spec says.
+- **Read and write share one unit.** `write_file` now also limits the encoded size to 100 000 bytes, so any file it writes can be read back.
+- **Safer error text.** The catch-all in the file tools returns only `unexpected error: <ClassName>`, and `web_search` replaces URLs with `<url>` and cuts the message to 200 characters. **Why:** messages go to the LLM and into traces and could hold local paths or proxy passwords.
+- **`MAX_INT_BITS` is 14 000** (was 100 000), because Python cannot turn an int of more than 4300 digits into text anyway.
+
+**Deferred (not fixed, decide later):** a symlink swap between the path check and the file use (`O_NOFOLLOW`); marking tool output as untrusted data (belongs in the session 4 executor spec); trimming nested values in `_loggable_args`; one shared `_trim` helper; a structural `for` loop in the retry; more `# WHY:` comments; spec drift (transient hints, the `tool` key in `retry` events, calculator error texts, `load_dotenv(path)`, unticked AC boxes); small items (`.env.example` newline, magic numbers, stronger wrong-shape and config-environment tests).
