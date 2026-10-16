@@ -236,7 +236,7 @@ Hand-written sections around the generated block:
 
 **Report** (`tests/evaluation/test_report.py`)
 - [ ] AC5: An off group (both flags `false`) and an on group (both `true`) with the same model, fingerprint and other config give one `ablation` row; off 10 failed of 100 and on 8 of 100 give a relative reduction of 0.2; off 0 failed gives `None` (`n/a`); on 12 of 100 against off 8 of 100 gives a negative reduction, printed as an increase.
-- [ ] AC6: No `ablation` row when the two groups differ in fingerprint, in model, in another config key (`max_replans`), or when only one flag differs; each such pair gives a "not compared" reason naming what differs.
+- [ ] AC6: No `ablation` row when the two groups differ in fingerprint, in model, in another config key (`max_replans`), or when only one flag differs; each such pair with the same model gives a "not compared" reason naming what differs (a pair with a different model gives no ablation row and no line, section 5.3).
 - [ ] AC7: Two groups that differ only in `ollama_model` give one `model` row; two that differ only in fingerprint give one `fix` row with "before" being the group with the earlier `started_at`.
 - [ ] AC8: `count_traces` on a folder with two traces that end in `run_end`, one without `run_end`, and one non-`.jsonl` file returns 2; a missing folder returns 0.
 - [ ] AC9: `render_markdown` gives the same text twice for the same files; it shows rates with one decimal (`63.3%`), every success rate with its interval, `incomplete 17/30` for an incomplete pass, and the fixed 3.3-points note.
