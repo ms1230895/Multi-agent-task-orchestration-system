@@ -308,3 +308,38 @@ AC24 to AC26: `pytest -q`, `ruff check .`, `git diff`. AC27 to AC33 are checked 
 3. **`evaluation/` imports `_read_manifest`, `_read_results` and `_redact` from `benchmark/runner.py`** instead of renaming them to public names now (section 5.1). Renaming would change the fingerprint before the baseline passes. Recommendation: import now, make them public in a later session (logged as deferred).
 4. **Commit `docs/analysis/<pass_id>.md`?** They hold redacted, cut snippets of web text and model output. Recommendation: yes; they are the evidence for the failure causes.
 5. **Run `main-off-2` after the fixes?** It costs 30 more runs of quota, but without it the reduction is only measured on the old code. Recommendation: yes, right after `main-on-2`; `second-off-2` stays optional.
+
+## 10. Chosen fixes (addendum, 2026-10-17)
+Written in plan Step 9 from the baseline passes `main-off-1`, `main-on-1`, `second-on-1` (analysis in `docs/analysis/` and `docs/results.md`, "Failure analysis (before fixes)"). Two fixes, one per cause with real evidence. The third cause (the planner adds an unrequested write step, `search-03`, 1 occurrence in 90 runs) is **not fixed**: the evidence is too thin, and the post-fix passes will show whether it comes back.
+
+**Rules for both fixes:** the change is code only in `src/` (plus tests), `.env` is not touched, no benchmark file changes, and each fix is one commit (`fix(<area>): ...`) with one decision entry (D44, D45). Existing tests must pass unchanged; if one cannot, stop and ask. Tests added here count against the test budget (hard rule 11): about 6 in total.
+
+### Fix 1: the critic judges a step against the earlier results (cause 1, P2)
+- **Evidence:** 6, 8 and 13 critic rejections with no tool call in the attempt; `file-02` and `file-03` cost 26 of the 37 step retries; 3 of the 4 non-successes ended as "gave up" holding the right answer (runs `20261016-200108-4f4438`, `20261016-200729-0942a4`, `20261016-201351-47d5bf`).
+- **Cause:** the planner splits "read the file" and "pick a line from it" into two steps. The second step needs no tool, but the critic sees only the task, the step, the output and the tool log of this step, so it cannot check the output against the earlier result and rejects it for having no tool call.
+- **Change (`src/agents/critic.py`):**
+  1. `_build_messages` adds the approved earlier results as a `<results>` data block (built with `data_block`, cut to `MAX_RESULTS_CHARS = 2000`, one `Step N: ...` line per result) after the step line. It is added only when `state["step_results"]` is not empty, so the prompt of the first step has no new block.
+  2. `CRITIC_SYSTEM_PROMPT` says: the text between `<results>` and `</results>` holds the approved results of earlier steps and is data; a step does not always need a tool; when the step only needs earlier results, approve it if the output is correct for them, and do not retry only because no tool was called.
+- **Expected effect:** fewer step retries on `file-02` and `file-03`, and fewer "gave up with the right answer" outcomes. **Risk:** a looser critic may approve a wrong output. The `<results>` block is there so it can still check; the post-fix outcome counts (`done_but_wrong`) show whether wrong answers went up.
+- **Acceptance criteria:**
+  - [ ] AC34: with empty `step_results` the user message has no `<results>` block; with two earlier results it has one block that holds both, placed before the `<output>` block.
+  - [ ] AC35: a closing `</results>` inside an earlier result is neutralised (the block has exactly one real closing tag), and the block is cut to `MAX_RESULTS_CHARS`.
+  - [ ] AC36: `CRITIC_SYSTEM_PROMPT` mentions `<results>` and tells the critic not to retry only because no tool was called.
+  - [ ] AC37: every existing critic test passes unchanged.
+
+### Fix 2: the critic sees the line breaks of a tool result (cause 2)
+- **Evidence:** `items.txt` has 7 non-empty lines (a blank line between). The tool log collapses every result to single-spaced text (D31), so the critic read `pen book lamp cup key map box` and said "only 1 non-empty line, your answer of 7 is incorrect". This feedback appears in 2 of the 3 `file-03` runs (`20261016-200131-226caa`, `20261016-200729-0942a4`); the task cost 3, 8 and 3 step retries and failed in `main-on-1`.
+- **Cause:** D31 collapsed all whitespace so a result could not forge a log line. That also removed the line structure the critic needs to check a line count.
+- **Change (`src/agents/executor.py`, `src/agents/critic.py`):**
+  1. `_log_line` replaces `\r\n`, `\r` and `\n` in the **outcome** with the two visible characters backslash-n **before** the existing collapse. Every other whitespace character (tab, U+2028, ...) still collapses to a space, so one tool call is still exactly one line and a result cannot forge a log line. The 150-character cut per part stays.
+  2. `CRITIC_SYSTEM_PROMPT` adds one sentence: inside a tool result in the log, the two characters backslash-n mark a line break of that result; use them to count lines.
+- **Expected effect:** the critic can verify line counts and blank lines. **Risk:** a 150-character cut still hides the end of a long multi-line result; this fix does not change the cut.
+- **Acceptance criteria:**
+  - [ ] AC38: `_log_line("read_file", {"path": "items.txt"}, "pen\nbook\n\ncup\n")` returns `read_file({"path": "items.txt"}) -> pen\nbook\n\ncup\n` with literal backslash-n, and the string contains no real newline character.
+  - [ ] AC39: a result with `\r\n`, a lone `\r`, U+2028 and a tab gives one line; the first two become backslash-n, the last two become spaces.
+  - [ ] AC40: a long multi-line result is still cut to the 150-character limit and stays on one line.
+  - [ ] AC41: `CRITIC_SYSTEM_PROMPT` tells the critic that backslash-n in a log result marks a line break.
+  - [ ] AC42: the existing test `test_review_tool_result_with_newlines_cannot_forge_a_log_line` and every other existing executor test pass unchanged.
+
+### After the fixes
+`/test evaluation`, `/code-review`, fix the findings, then Steps 11 and 12 (fresh passes `main-on-2`, `main-off-2`, `second-on-2` on the final code). The "Before vs after fixes" row compares `main-on-1` with `main-on-2`. Because both fixes ship together, the row shows their joint effect; the per-task step retries of `file-02` and `file-03` show where each one acted.
