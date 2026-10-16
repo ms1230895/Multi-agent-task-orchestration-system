@@ -7,7 +7,7 @@
 ## Progress
 - [x] Step 1: Logger core (`src/logger.py`, `LOGS_DIR`, helpers moved from the gate)
 - [x] Step 2: `error` field in `AgentState`
-- [ ] Step 3: Planner and critic events
+- [x] Step 3: Planner and critic events
 - [ ] Step 4: Executor, `advance` and graph wiring
 - [ ] Step 5: Fake LLM: an error for one role only
 - [ ] Step 6: `run_task` (`src/run.py`)
