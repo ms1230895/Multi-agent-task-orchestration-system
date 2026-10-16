@@ -1,6 +1,6 @@
 # Spec: Executor
 
-**Status:** Draft
+**Status:** Approved
 **Branch:** feature/executor
 **Date:** 2026-10-16
 
