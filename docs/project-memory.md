@@ -60,3 +60,9 @@ Use it to build a whole plan after one go-ahead. Claude stops only on a failed c
 fix it and then merge
 ```
 Said after `/code-review` listed findings and asked which to fix. Claude fixed all Warnings and deferred the Suggestions (D31); the merge itself is done by Gaurav with `/git-feature`. Model: sonnet, effort medium.
+
+### 2026-10-16: Spec for session 6, benchmark
+```
+/create-spec benchmark
+```
+No extra description: built from the roadmap entry for session 6, `docs/specs/architecture.md` (sections 2.7 and 5), decisions D12 and D24, and first-run problems P3 to P5. Use this short form when the roadmap already describes the session well. Model: opus, effort high.

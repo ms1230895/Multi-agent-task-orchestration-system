@@ -2,7 +2,7 @@
 
 **Spec:** docs/specs/benchmark.md
 **Branch:** feature/benchmark
-**Status:** Waiting for approval
+**Status:** Approved
 
 ## Progress
 - [ ] Step 1: Package and text helpers (`benchmark/text.py`)
