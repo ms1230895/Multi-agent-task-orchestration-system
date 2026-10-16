@@ -1,9 +1,9 @@
 # Progress
 
 ## Status
-- **Phase:** Build (roadmap session 4 of 9 next)
-- **Last completed:** Session 3, graph-planner-critic: done (317 tests pass; code review found 0 Critical, Warnings and Suggestions not yet fixed; `docs/plans/graph-planner-critic-plan.md`, decisions D9-D15 in `docs/plans/decisions.md`)
-- **Next:** Session 4, executor (spec: opus, high; implementation: sonnet, medium)
+- **Phase:** Build (roadmap session 5 of 9 next)
+- **Last completed:** Session 4, executor: done (367 tests pass; code review found 0 Critical, Warnings and Suggestions not yet fixed; `docs/plans/executor-plan.md`, decisions D16-D22 in `docs/plans/decisions.md`)
+- **Next:** Session 5, tracing-and-first-runs (spec: opus, high; implementation: sonnet, medium)
 
 ## Done
 - [x] Project folder and `.claude/` skeleton

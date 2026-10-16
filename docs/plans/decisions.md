@@ -59,3 +59,28 @@ No third `"replan"` verdict. A replan happens only after the step's retries are 
 
 ### D15. No event emission yet
 The planner, critic and `advance` have no `on_event` callback. **Why:** the logger arrives in session 5, which adds event emission and the `run_task` entry point together.
+
+## Session 4: executor (2026-10-16)
+
+### D16. Tool definitions are built from the registry
+`tool_definitions()` in `src/tools/definitions.py` returns one OpenAI-style function dict per registered tool, with the registry name, a short description and the Pydantic JSON schema. **Why:** `bind_tools` with the Pydantic classes would name the tools `CalculatorArgs` and so on, and the gate would reject every call as unknown. The same list is used in both ablation passes, so only the gate differs.
+
+### D17. Invalid tool calls also go through the gate
+A reply's `invalid_tool_calls` (arguments that were not valid JSON) are passed to `call_tool` with the raw argument string. **Why:** every call the LLM makes should count in the failed-tool-call metric the same way in both passes, and the LLM gets the error text to fix its next call.
+
+### D18. Executor limits
+At most 5 tool calls run per reply (the rest are answered with an error), tool results are cut to 8000 chars, and `last_output` to 4000 chars (equal to the critic's view). **Why:** one reply must not start dozens of searches, and prompts must stay small. **Risk:** these are guesses; check the first real traces (session 5) for tasks that fail because of them.
+
+### D19. The executor sees its previous output on a retry
+With the critic's feedback it also gets its rejected output (cut to 1000 chars). **Why:** it can fix the attempt instead of starting over.
+
+### D20. Untrusted text goes through `data_block`
+`data_block(tag, text, limit)` cuts the text, neutralises any closing tag for `tag` inside it, and wraps it in markers. Used for the critic's `<output>`, the planner's replan `<results>` and `<feedback>`, and the executor's context. The system prompts say marked text is data. **Why:** this fixes the two security Warnings from the session 3 review (tool output could close the critic's `<output>` early and force an approval). It lowers prompt-injection risk; it does not remove it.
+
+### D21. `stub_executor` moved to `tests/fakes.py`
+It is gone from `src/`; the graph tests pass it explicitly. `RecordingFakeLLM` finds its role by "You are the planner / critic / executor" in the system prompt and raises on an unknown role (review Suggestion S7).
+
+### D22. Deferred from the session 3 code review
+Not fixed in session 4:
+- **Warnings:** one shared `ask_validated` helper for planner and critic (duplicated re-ask flow); a whole-graph test that the state is clean after a replan (AC38); two outdated lines in `architecture.md` (the planner failure "router then finalizes", and finalize "logs `run_end`", which is session 5); progress and AC checkboxes.
+- **Suggestions:** cap `parse_json_model` input and make the fence regex linear; cap `last_output` stored in `step_results` (the executor now caps new outputs at 4000); `recursion_limit` enforced in `build_graph`; misplaced `# WHY:` in `finalize`; unused `Status` and `VerdictValue` aliases; weak AC26 assertion; `or` defaults in `build_graph` (the executor default is now `is not None`); a test for the brace limitation in `parse_json_model`; missing docstrings and `# WHY:` in tests.

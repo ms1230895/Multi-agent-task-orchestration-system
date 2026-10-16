@@ -6,12 +6,13 @@ fake LLM and a spy executor. No real LLM, no network (Hard rule 8).
 
 import copy
 import json
+from pathlib import Path
 from typing import Any
 
 import pytest
+from langchain_core.messages import AIMessage
 
 import src.graph as graph_module
-from src.agents.executor import stub_executor
 from src.config import Settings, load_settings
 from src.graph import (
     advance,
@@ -23,7 +24,7 @@ from src.graph import (
     route_after_planner,
 )
 from src.state import AgentState, initial_state
-from tests.fakes import RecordingFakeLLM, make_state
+from tests.fakes import RecordingFakeLLM, make_state, stub_executor
 
 
 def _settings(**env: str) -> Settings:
@@ -263,7 +264,8 @@ class SpyExecutor:
 
 
 def _run(llm: RecordingFakeLLM, settings: Settings, spy: SpyExecutor | None = None) -> AgentState:
-    graph = build_graph(llm=llm, settings=settings, executor=spy)
+    # WHY: no spy means the plain stub, never the real executor, so these tests need no tools.
+    graph = build_graph(llm=llm, settings=settings, executor=spy or stub_executor)
     return graph.invoke(
         initial_state("do the task", "run-1"),
         config={"recursion_limit": recursion_limit(settings)},
@@ -348,3 +350,37 @@ def test_ac40_build_graph_without_llm_uses_get_llm_and_makes_no_call(
     build_graph(settings=S)
     assert seen == [S]
     assert fake.calls == []
+
+
+# ---- AC26-AC27: the real executor is the default ----
+
+
+def test_ac26_build_graph_without_executor_runs_real_executor_with_calculator() -> None:
+    call = {"name": "calculator", "args": {"expression": "6*7"}, "id": "c1", "type": "tool_call"}
+    llm = RecordingFakeLLM(
+        planner_replies=[_plan_reply("compute 6*7")],
+        critic_replies=[_verdict_reply("approve", "ok")],
+        executor_replies=[AIMessage(content="", tool_calls=[call]), AIMessage("The answer is 42")],
+    )
+    # WHY: no `executor=` argument, so this protects the default wiring in build_graph.
+    graph = build_graph(llm=llm, settings=S)
+    final = graph.invoke(
+        initial_state("do the task", "run-1"),
+        config={"recursion_limit": recursion_limit(S)},
+    )
+    assert final["status"] == "done"
+    assert final["final_answer"] == "The answer is 42"
+    assert llm.count("executor") == 2
+
+
+def test_ac27_stub_executor_no_longer_exists_in_src() -> None:
+    # WHY: the stub must live only in tests, or it could ship as a fake agent.
+    src_dir = Path(graph_module.__file__).parent
+    offenders = [p.name for p in src_dir.rglob("*.py") if "stub_executor" in p.read_text("utf-8")]
+    assert offenders == []
+    assert not hasattr(graph_module, "stub_executor")
+
+
+def test_ac27_stub_executor_from_fakes_returns_step_text() -> None:
+    state = make_state(plan=["a", "b"], current_step=1)
+    assert stub_executor(state) == {"last_output": "stub output for step 2: b"}

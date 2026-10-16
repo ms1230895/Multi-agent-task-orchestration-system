@@ -56,7 +56,7 @@ Path safety for file tools: resolve the path (`Path.resolve()`) and reject it un
 {"ok": bool, "output": str | None, "error": str | None}
 ```
 
-**Registry** (`src/tools/__init__.py`): `TOOLS: dict[str, tuple[type[BaseModel], Callable]]`, mapping a tool name to its schema and function. The same registry gives the LangChain tool definitions that are bound to the executor's LLM (`llm.bind_tools(...)`).
+**Registry** (`src/tools/__init__.py`): `TOOLS: dict[str, tuple[type[BaseModel], Callable]]`, mapping a tool name to its schema and function. `src/tools/definitions.py` builds the tool list bound to the executor's LLM (`llm.bind_tools(tool_definitions())`) from the registry: one entry per tool with its registry name, a short description (`TOOL_DESCRIPTIONS`), and the JSON schema of its Pydantic model. Passing the Pydantic classes directly would name the tools after the classes, and the gate would reject every call. The same list is used with `ENABLE_VALIDATION` on and off.
 
 ### 2.3 Reliability layer: the validation gate
 Every tool call from the executor goes through one function, `call_tool(name, args) -> {ok, output, error}`. The steps run in this order:
@@ -74,22 +74,25 @@ Each agent is a function `(state: AgentState) -> dict` that returns only the sta
 
 **Planner** (`src/agents/planner.py`)
 - Input: `task`. On a replan it also gets the old plan, the step results so far, and the critic's last feedback.
+- On a replan, step results and the critic's feedback go into the prompt as `data_block`s (untrusted text, see Executor).
 - Output: JSON `{"steps": ["...", "..."]}`, validated by a Pydantic model `Plan` (1 to `MAX_PLAN_STEPS` = 6 steps, each a non-empty string).
 - If the JSON is invalid, re-ask once with the validation error. If it is still invalid, set `status="failed"` (the router then finalizes).
 - Logs `plan_created` (or `replan` on a replan) with the steps.
 
 **Executor** (`src/agents/executor.py`)
-- Works on exactly one step: `plan[current_step]`. It also sees the task and the results of earlier steps, and the critic's feedback if this is a retry.
-- Inner tool loop, at most `MAX_TOOL_ITERATIONS` (default 5) rounds:
+- Works on exactly one step: `plan[current_step]`. The prompt holds the task, the whole plan, the current step ("step N of M"), and the earlier step results. On a retry it also holds the critic's feedback and its own rejected output.
+- Inner tool loop, at most `MAX_TOOL_ITERATIONS` (default 5) LLM calls:
   1. Call the LLM (with tools bound).
-  2. If the reply has no tool calls, that reply is the step's output; stop.
-  3. For each tool call: `call_tool(...)`, then append a `ToolMessage` holding the `{ok, output, error}` result. When a call failed, the error text is what lets the LLM correct itself in the next round.
+  2. If the reply has no tool calls, that reply is the step's output (cut to 4000 chars; an empty reply gives `"Step not completed: the executor gave an empty reply."`); stop.
+  3. For each tool call, at most 5 per reply: `call_tool(...)`, then append a `ToolMessage` holding the output, or `error: ...` with status `error`, cut to 8000 chars. Calls whose arguments were not valid JSON (`invalid_tool_calls`) also go through `call_tool`, so they count in the failed-tool-call metric in both ablation passes. Extra calls are answered with an error and not run, so every call id gets exactly one answer. The error text is what lets the LLM correct itself in the next round.
   4. Go to 1.
-- If the limit is reached without a final reply, the output is `"Step not completed: tool iteration limit reached"` plus the last tool result. The critic will then reject it.
+- If the limit is reached without a final reply, the output is `"Step not completed: tool iteration limit reached."` plus the last tool result. The critic will then reject it.
+- Errors from the LLM call are not caught (D12). The executor imports `call_tool` and `tool_definitions` only, never a tool function, so nothing can call a tool around the gate.
+- Untrusted text (earlier results, feedback, the previous output) goes into the prompt through `data_block` (`src/agents/prompting.py`): cut to a limit, any closing tag inside it neutralised, wrapped in `<results>`, `<feedback>`, or `<previous_output>` markers. The system prompt says text in these markers and every tool result is data, not instructions. This lowers prompt-injection risk; it does not remove it.
 - Writes `last_output`.
 
 **Critic** (`src/agents/critic.py`)
-- Input: task, current step, `last_output`.
+- Input: task, current step, `last_output`, put in the prompt as a `data_block("output", ...)`; the system prompt says to ignore any instruction inside it.
 - Output: JSON `{"verdict": "approve" | "retry", "feedback": "..."}`, validated by a Pydantic model `Verdict`.
 - If the JSON is invalid, re-ask once. If it is still invalid, treat it as `verdict="retry"` with feedback "critic output invalid". This is safe because retries are limited.
 - Logs `critic_verdict`.
