@@ -5,7 +5,7 @@
 **Status:** Approved
 
 ## Progress
-- [ ] Step 1: dependencies, Streamlit config, and a feasibility check
+- [x] Step 1: dependencies, Streamlit config, and a feasibility check
 - [ ] Step 2: `UiSettings` in `src/config.py`
 - [ ] Step 3: `format_record` and `HTML_COLOURS` in `src/console.py`
 - [ ] Step 4: `ui/render.py` (safe HTML timeline)
