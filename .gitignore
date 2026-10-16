@@ -10,7 +10,8 @@ __pycache__/
 
 # Generated at runtime
 logs/
-workspace/
+workspace/*
+!workspace/.gitkeep
 
 # Claude Code personal settings
 .claude/settings.local.json

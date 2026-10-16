@@ -5,7 +5,7 @@
 **Status:** Approved
 
 ## Progress
-- [ ] Step 1: Project scaffolding
+- [x] Step 1: Project scaffolding
 - [ ] Step 2: Config (`src/config.py`)
 - [ ] Step 3: Console (`src/console.py`)
 - [ ] Step 4: Tool result base (`src/tools/base.py`)
