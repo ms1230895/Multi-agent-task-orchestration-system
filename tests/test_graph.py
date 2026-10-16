@@ -11,7 +11,6 @@ from typing import Any
 import pytest
 
 import src.graph as graph_module
-from src.agents.executor import stub_executor
 from src.config import Settings, load_settings
 from src.graph import (
     advance,
@@ -23,7 +22,7 @@ from src.graph import (
     route_after_planner,
 )
 from src.state import AgentState, initial_state
-from tests.fakes import RecordingFakeLLM, make_state
+from tests.fakes import RecordingFakeLLM, make_state, stub_executor
 
 
 def _settings(**env: str) -> Settings:
@@ -263,7 +262,8 @@ class SpyExecutor:
 
 
 def _run(llm: RecordingFakeLLM, settings: Settings, spy: SpyExecutor | None = None) -> AgentState:
-    graph = build_graph(llm=llm, settings=settings, executor=spy)
+    # WHY: no spy means the plain stub, never the real executor, so these tests need no tools.
+    graph = build_graph(llm=llm, settings=settings, executor=spy or stub_executor)
     return graph.invoke(
         initial_state("do the task", "run-1"),
         config={"recursion_limit": recursion_limit(settings)},

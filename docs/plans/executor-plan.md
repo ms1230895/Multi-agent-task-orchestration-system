@@ -8,7 +8,7 @@
 - [x] Step 1: Tool definitions (`src/tools/definitions.py`)
 - [x] Step 2: Data markers (`src/agents/prompting.py`)
 - [x] Step 3: Critic and planner prompt fixes
-- [ ] Step 4: Test fakes (role markers, `bind_tools`, stub moved)
+- [x] Step 4: Test fakes (role markers, `bind_tools`, stub moved)
 - [ ] Step 5: Executor loop (`src/agents/executor.py`)
 - [ ] Step 6: Graph wiring and stub removal
 - [ ] Step 7: Docs sync and final checks
