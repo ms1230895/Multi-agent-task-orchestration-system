@@ -1,6 +1,6 @@
 # Spec: Graph, planner, and critic
 
-**Status:** Draft
+**Status:** Approved
 **Branch:** feature/graph-planner-critic
 **Date:** 2026-10-16
 
