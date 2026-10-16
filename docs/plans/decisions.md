@@ -36,3 +36,26 @@ The `/code-review` found one verified Critical issue and four Warnings. All were
 - **`MAX_INT_BITS` is 14 000** (was 100 000), because Python cannot turn an int of more than 4300 digits into text anyway.
 
 **Deferred (not fixed, decide later):** a symlink swap between the path check and the file use (`O_NOFOLLOW`); marking tool output as untrusted data (belongs in the session 4 executor spec); trimming nested values in `_loggable_args`; one shared `_trim` helper; a structural `for` loop in the retry; more `# WHY:` comments; spec drift (transient hints, the `tool` key in `retry` events, calculator error texts, `load_dotenv(path)`, unticked AC boxes); small items (`.env.example` newline, magic numbers, stronger wrong-shape and config-environment tests).
+
+## Session 3: graph-planner-critic (2026-10-16)
+
+### D9. `AgentState` has a `route` field
+`advance` calls `decide()`, moves the counters, and stores its decision in `state["route"]`. `route_after_advance` only reads it. **Why:** after the counters move (for example `current_step += 1`), the decision cannot be worked out again from the new state. The alternative, a router that decides before `advance` runs, would force `advance` to leave the counters alone and break the rule that every state change happens inside a node.
+
+### D10. A conditional edge after the planner
+If the planner gives up (`status="failed"`, empty plan), the run goes planner → finalize. **Why:** the executor would otherwise index into an empty plan.
+
+### D11. The planner clears `step_results`, not `advance`
+On a replan, `advance` only increments `replans`. The planner reads the old plan, step results and feedback, then returns a new plan with `current_step`, `retries`, `step_results`, `verdict` and `feedback` reset. **Why:** if `advance` cleared `step_results`, the planner could not show the old results in its prompt, and the architecture says it should.
+
+### D12. Agents do not catch LLM errors
+Connection errors, usage caps and timeouts raised by `llm.invoke` pass through the planner and critic to the caller. **Why:** the benchmark must pause on infrastructure errors and not count them as agent failures (architecture section 5). Hard rule 1 (never raise) covers tools, not agents. `run_task` (session 5) catches crashes.
+
+### D13. The critic has only `approve` and `retry`
+No third `"replan"` verdict. A replan happens only after the step's retries are used up. **Why:** one fewer route to build and test. **Revisit:** after the session 7 traces show whether retries are often wasted.
+
+### D14. `MAX_PLAN_STEPS` is a constant, not an `.env` setting
+`MAX_PLAN_STEPS = 6` lives in `src/config.py`. **Why:** it is a fixed design limit used by `Plan` and `recursion_limit`, and it must be the same in every benchmark pass.
+
+### D15. No event emission yet
+The planner, critic and `advance` have no `on_event` callback. **Why:** the logger arrives in session 5, which adds event emission and the `run_task` entry point together.

@@ -2,7 +2,7 @@
 
 **Spec:** docs/specs/graph-planner-critic.md
 **Branch:** feature/graph-planner-critic
-**Status:** Approved
+**Status:** Implemented
 
 ## Progress
 - [x] Step 1: Scaffolding and `MAX_PLAN_STEPS`
@@ -13,7 +13,7 @@
 - [x] Step 6: Stub executor (`src/agents/executor.py`)
 - [x] Step 7: Router logic (`decide`, `advance`, edges, `finalize`, `recursion_limit`)
 - [x] Step 8: Graph wiring (`build_graph`) and end-to-end check
-- [ ] Step 9: Docs sync and final checks
+- [x] Step 9: Docs sync and final checks
 
 ## Overview
 Build bottom-up, in the order the pieces depend on each other: the state first, then the shared JSON helper, then the two agents, then the stub executor, then the router's pure functions, and last the graph that wires them together. Every step before step 8 is a plain function that can be checked with a one-line `python -c` and a fake LLM, so no step needs a real model. The full test suite is written afterwards with `/test`, from the spec's acceptance criteria.

@@ -114,42 +114,43 @@ Planner and Critic always validate their own JSON output, whatever `ENABLE_VALID
 | `replans` | `int` | Replans used in the **whole run** (never reset) |
 | `final_answer` | `str` | Set by finalize |
 | `status` | `str` | `"running"`, `"done"`, or `"failed"` |
+| `route` | `str` | The decision `advance` made: `next_step`, `done`, `retry`, `replan`, or `failed` (`""` before the first one). The edge after `advance` only reads it. |
 
 **Graph**
 
 ```mermaid
 flowchart TD
     START([START]) --> planner
-    planner --> executor
+    planner -- "status running" --> executor
+    planner -- "status failed" --> finalize
     executor --> critic
-    critic --> router{router<br/>plain Python}
-    router -- "approve + steps left<br/>(current_step += 1)" --> executor
-    router -- "approve + last step" --> finalize
-    router -- "retry + retries left<br/>(retries += 1)" --> executor
-    router -- "retries used up + replans left<br/>(replans += 1)" --> planner
-    router -- "replans used up" --> finalize_failed[finalize<br/>status = failed]
+    critic --> advance
+    advance -- "route next_step or retry" --> executor
+    advance -- "route replan" --> planner
+    advance -- "route done or failed" --> finalize
     finalize --> END([END])
-    finalize_failed --> END
 ```
 
-(`finalize` and `finalize_failed` are the same node, drawn twice for clarity.)
+**Router rules** (`decide(state, settings) -> Route` in `src/graph.py`), plain Python, no LLM, no state change. Rules are checked in this order:
 
-**Router** (`route_after_critic(state) -> str`), plain Python, no LLM. Rules are checked in this order:
+1. `status == "failed"` (e.g. the planner gave up) → `failed`
+2. `verdict == "approve"` and `current_step < len(plan) - 1` → `next_step`
+3. `verdict == "approve"` and this is the last step → `done`
+4. `retries < MAX_RETRIES` → `retry` (same step, with feedback)
+5. `replans < MAX_REPLANS` → `replan`
+6. otherwise → `failed`
 
-1. `status == "failed"` (e.g. the planner gave up) → `finalize`
-2. `verdict == "approve"` and `current_step < len(plan) - 1` → `executor` (next step)
-3. `verdict == "approve"` and this is the last step → `finalize` (done)
-4. `verdict == "retry"` and `retries < MAX_RETRIES` → `executor` (same step, with feedback)
-5. `retries >= MAX_RETRIES` and `replans < MAX_REPLANS` → `planner` (replan)
-6. otherwise → `finalize` with `status="failed"`
+Rules 4 to 6 cover every verdict that is not `"approve"`, so an unexpected verdict counts as a retry and never as success.
 
-A conditional edge function in LangGraph should only *choose* the next node. The counter updates (`current_step += 1`, `retries += 1`, `replans += 1`, saving the approved output into `step_results`) happen in a small `advance` node that runs right after the critic. `advance` uses the same rule order, and the router then reads the updated state. This keeps every state change inside a node, where the trace can see it.
+A conditional edge function in LangGraph should only *choose* the next node. The counter updates (`current_step += 1`, `retries += 1`, `replans += 1`, saving the approved output into `step_results`) happen in a small `advance` node that runs right after the critic. `advance` calls `decide`, applies the changes, and stores the decision in `state["route"]`. The edge function `route_after_advance` then only reads `route` (`next_step` and `retry` → executor, `replan` → planner, anything else → finalize). The decision is stored because, once the counters have moved, it can no longer be worked out from the new state. This keeps every state change inside a node, where the trace can see it.
 
-On a replan, the new plan starts at `current_step = 0`, `retries = 0`, and `step_results` is cleared. The planner sees the old results in its prompt, so useful work is not lost.
+There is also a conditional edge after the planner: if the planner gave up (`status == "failed"`, empty plan), the run goes straight to `finalize`, so the executor never runs on an empty plan.
+
+On a replan, `advance` only increments `replans`. The planner then reads the old plan, step results and feedback, and returns the new plan with `current_step = 0`, `retries = 0` and `step_results`, `verdict` and `feedback` cleared. The old results reach the planner through its prompt, so useful work is not lost.
 
 **Finalize** builds `final_answer`: the last approved step result if status is done, or a short failure message with the best partial result if failed. It logs `run_end`.
 
-**Hard limits** (Hard rule 5): `MAX_RETRIES` (default 2), `MAX_REPLANS` (default 1), `MAX_TOOL_ITERATIONS` (default 5), `MAX_PLAN_STEPS` (6), and LangGraph `recursion_limit`. The recursion limit is computed from the other limits, roughly `MAX_PLAN_STEPS × (MAX_RETRIES + 1) × (MAX_REPLANS + 1) × 4 + 10`, so the router's limits always trigger first. If the recursion limit is ever hit, that is a bug.
+**Hard limits** (Hard rule 5): `MAX_RETRIES` (default 2), `MAX_REPLANS` (default 1), `MAX_TOOL_ITERATIONS` (default 5), `MAX_PLAN_STEPS` (6, a constant in `src/config.py`, not an `.env` setting), and LangGraph `recursion_limit` (`recursion_limit(settings)` in `src/graph.py`). The recursion limit is computed from the other limits, roughly `MAX_PLAN_STEPS × (MAX_RETRIES + 1) × (MAX_REPLANS + 1) × 4 + 10`, so the router's limits always trigger first. If the recursion limit is ever hit, that is a bug.
 
 ### 2.6 Entry point
 `src/run.py`:
@@ -220,6 +221,6 @@ A **pass** is one model + one config running all 30 tasks. The Ollama free plan 
 - Planned passes: main model off, main model on, second model on (and second model off if quota allows). Repeated passes are allowed (e.g. `main-on-2`) to reach 100+ runs and to see run-to-run variance.
 
 ## 6. Open questions
-1. Should the critic be able to request a replan directly (a third verdict, `"replan"`), or should replans only happen after retries are used up? This spec uses only `approve` / `retry`, as listed in the brief.
+1. ~~Critic `replan` verdict~~ Decided in session 3: only `approve` / `retry`. A replan happens only after the step's retries are used up. Revisit after the session 7 traces show whether retries are often wasted. See `docs/plans/decisions.md`.
 2. ~~`ENABLE_RETRY` scope~~ Decided in session 2: `ENABLE_RETRY` controls gate-level retries of transient tool errors only (counted by `TOOL_RETRY_ATTEMPTS`). Critic-driven step retries (`MAX_RETRIES`) stay on in both ablation passes. See `docs/plans/decisions.md`.
 3. The entry point is a new file, `src/run.py`, which is not yet in the CLAUDE.md layout. Alternative: put `run_task` in `src/graph.py`.
