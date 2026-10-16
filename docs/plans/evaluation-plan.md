@@ -15,7 +15,7 @@ Part A: build the tools, run the baseline, choose the fixes
 - [x] Step 7: baseline passes (Gaurav runs them)
 - [x] Step 8: baseline analysis and the failure causes
 - [x] Step 9: spec addendum, section 10 "Chosen fixes" (Gaurav approves)
-- [ ] Step 10: the fixes (up to 3, one commit each)
+- [x] Step 10: the fixes (up to 3, one commit each)
 
 Part B: runs after `/test` and `/code-review` (the measured code must be the merged code)
 - [ ] Step 11: post-fix passes
