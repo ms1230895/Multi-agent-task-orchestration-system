@@ -22,6 +22,6 @@
 - [ ] GitHub repo and issues
 
 ## Open questions
-- Which Ollama model supports tool calling? (`test_toolcall.py` not run yet)
+- [x] Tool calling confirmed: gpt-oss:120b-cloud (main), gemma4:31b-cloud (second). deepseek not on free plan.
 - Were the Python libraries installed in this project's `.venv`?
 - GitHub MCP scope (`claude mcp list`)

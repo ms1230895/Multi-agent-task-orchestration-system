@@ -16,7 +16,7 @@ Report whatever numbers we actually get.
 ## Stack
 - Python 3.13, virtual environment `.venv`
 - LangGraph (orchestration), langchain-core, langchain-ollama (`ChatOllama`)
-- Ollama cloud models. Default candidate `gpt-oss:120b-cloud`, not yet confirmed by the tool-calling test. The model name is always read from `.env`.
+- Ollama cloud models (free plan, has 5-hour and weekly usage caps): main `gpt-oss:120b-cloud`, second `gemma4:31b-cloud` (both confirmed to do tool calling). The model name is always read from `.env`. Never mix models within one benchmark pass.
 - Pydantic (validation), ddgs (web search), rich (terminal colours), pytest, ruff
 - Editor: VS Code with Pylance, Ruff, Error Lens, Better Comments (settings in `.vscode/`)
 
