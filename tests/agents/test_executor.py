@@ -70,7 +70,15 @@ class CallToolSpy:
         self.results = results if results is not None else [success("ok")]
         self.calls: list[tuple[Any, Any, Settings | None]] = []
 
-    def __call__(self, name: Any, args: Any, *, settings: Settings | None = None) -> ToolResult:
+    def __call__(
+        self,
+        name: Any,
+        args: Any,
+        *,
+        settings: Settings | None = None,
+        on_event: Any = None,
+    ) -> ToolResult:
+        # WHY: the executor now passes `on_event` to the real gate (session 5); the spy accepts it.
         self.calls.append((name, args, settings))
         index = min(len(self.calls) - 1, len(self.results) - 1)
         return self.results[index]

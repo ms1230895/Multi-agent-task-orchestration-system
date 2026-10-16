@@ -13,6 +13,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, To
 from src.agents.parsing import reply_text
 from src.agents.prompting import data_block
 from src.config import Settings
+from src.logger import EventCallback
 from src.state import AgentState
 from src.tools.definitions import tool_definitions
 from src.validation import call_tool
@@ -68,12 +69,16 @@ def _build_messages(state: AgentState) -> list[BaseMessage]:
     return [SystemMessage(EXECUTOR_SYSTEM_PROMPT), HumanMessage(text)]
 
 
-def _run_calls(reply: Any, settings: Settings) -> list[ToolMessage]:
+def _run_calls(
+    reply: Any, settings: Settings, on_event: EventCallback | None
+) -> list[ToolMessage]:
     """Run the tool calls of one LLM reply through the gate; answer every call id once.
 
     Args:
         reply: the `AIMessage` with `tool_calls` and possibly `invalid_tool_calls`.
         settings: passed to `call_tool`, so the ablation flags apply.
+        on_event: passed to `call_tool`, which emits `tool_call`, `validation_error` and
+            tool `retry` events.
 
     Returns:
         One `ToolMessage` per call, in order. Calls after `MAX_CALLS_PER_REPLY` are answered
@@ -91,7 +96,7 @@ def _run_calls(reply: Any, settings: Settings) -> list[ToolMessage]:
                 ToolMessage(content=SKIPPED_CALL_TEXT, tool_call_id=call_id or "", status="error")
             )
             continue
-        result = call_tool(name, args, settings=settings)
+        result = call_tool(name, args, settings=settings, on_event=on_event)
         content = result["output"] or "" if result["ok"] else f"error: {result['error']}"
         messages.append(
             ToolMessage(
@@ -103,13 +108,21 @@ def _run_calls(reply: Any, settings: Settings) -> list[ToolMessage]:
     return messages
 
 
-def run_executor(state: AgentState, *, llm: BaseChatModel, settings: Settings) -> dict[str, Any]:
+def run_executor(
+    state: AgentState,
+    *,
+    llm: BaseChatModel,
+    settings: Settings,
+    on_event: EventCallback | None = None,
+) -> dict[str, Any]:
     """Carry out the current step and return the state fields it changes.
 
     Args:
         state: the current run state.
         llm: the chat model. Shared with the planner and critic, so one run uses one model.
         settings: the limits and flags (`max_tool_iterations`, ablation switches).
+        on_event: optional callback `(event, data)`. The executor has no event of its own;
+            it passes the callback to every `call_tool`.
 
     Returns:
         `{"last_output": ...}`: the LLM's final text, or a "Step not completed" message
@@ -138,7 +151,7 @@ def run_executor(state: AgentState, *, llm: BaseChatModel, settings: Settings) -
 
         # STEP 3: run the calls and give each result back to the LLM.
         # WHY: the error text is what lets the LLM correct itself in the next round.
-        tool_messages = _run_calls(reply, settings)
+        tool_messages = _run_calls(reply, settings, on_event)
         messages.extend(tool_messages)
         last_tool_text = str(tool_messages[-1].content)
 
