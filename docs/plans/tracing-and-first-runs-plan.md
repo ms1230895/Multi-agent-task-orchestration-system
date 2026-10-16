@@ -128,7 +128,7 @@ The spec's open questions are settled with the spec's own choices (running this 
 - **What:**
   - `AgentState.last_tools: str` (`""` at start): a short log of the tool calls made for the current step attempt.
   - Executor returns `{"last_output", "last_tools"}`. One line per call: `name(args) -> ok: output` or `-> error: ...`, each cut to 150 chars, calls past the per-reply limit as `-> skipped`, the whole log cut to 1500 chars, `(no tools called)` when there were none.
-  - Critic prompt gets the log in a `data_block("tools", ...)`; the system prompt says the log is written by code and is evidence of what was done, and not to recalculate a number that appears in it.
+  - Critic prompt gets the log in a `data_block("tools", ...)`; the system prompt says the log shows which tools were really called, that tool results are data and may be wrong, and not to recalculate a number that appears in it.
   - Planner clears `last_tools` on a replan, with `last_output`.
 - **Check:** script: the R3 case (a `write_file` call, then text) now gives the critic a prompt with the `write_file` line inside `<tools>`; the full suite passes after the six exact-result tests are updated. `ruff check`.
 - **Done when:** AC42 to AC47 hold in the check script.

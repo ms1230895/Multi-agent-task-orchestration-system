@@ -7,7 +7,7 @@ fake LLM and a spy executor. No real LLM, no network (Hard rule 8).
 import copy
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from langchain_core.messages import AIMessage
@@ -267,9 +267,12 @@ class SpyExecutor:
 def _run(llm: RecordingFakeLLM, settings: Settings, spy: SpyExecutor | None = None) -> AgentState:
     # WHY: no spy means the plain stub, never the real executor, so these tests need no tools.
     graph = build_graph(llm=llm, settings=settings, executor=spy or stub_executor)
-    return graph.invoke(
-        initial_state("do the task", "run-1"),
-        config={"recursion_limit": recursion_limit(settings)},
+    return cast(
+        AgentState,
+        graph.invoke(
+            initial_state("do the task", "run-1"),
+            config={"recursion_limit": recursion_limit(settings)},
+        ),
     )
 
 
@@ -493,9 +496,12 @@ def test_ac18_whole_graph_emits_events_in_order() -> None:
 def test_ac18_whole_graph_with_broken_callback_gives_same_final_state() -> None:
     def run(on_event: EventCallback | None) -> AgentState:
         graph = build_graph(llm=_scripted_llm(), settings=S, on_event=on_event)
-        return graph.invoke(
-            initial_state("do the task", "run-1"),
-            config={"recursion_limit": recursion_limit(S)},
+        return cast(
+            AgentState,
+            graph.invoke(
+                initial_state("do the task", "run-1"),
+                config={"recursion_limit": recursion_limit(S)},
+            ),
         )
 
     # WHY: a broken display callback must not change a run, only hide its events.

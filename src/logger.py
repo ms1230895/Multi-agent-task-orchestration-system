@@ -140,10 +140,12 @@ class TraceLogger:
 
         # WHY: one open-write-close per line keeps every line written before a crash, and no
         # file handle stays open. `default=str` means a strange value in tool arguments (the
-        # LLM chooses them) can never break logging.
+        # LLM chooses them) can never break logging. `ensure_ascii=True` writes every non-ASCII
+        # character as \\uXXXX, so a line separator inside web text (U+2028) cannot split the
+        # line, and a lone surrogate cannot make the write fail and lose the line.
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            line = json.dumps(record, ensure_ascii=False, default=str)
+            line = json.dumps(record, ensure_ascii=True, default=str)
             with self.path.open("a", encoding="utf-8") as file:
                 file.write(line + "\n")
         except (OSError, TypeError, ValueError):
@@ -157,7 +159,9 @@ class TraceLogger:
 def read_trace(path: Path) -> list[dict[str, Any]]:
     """Read a trace file and return its records in order, skipping empty lines."""
     records = []
-    for line in path.read_text(encoding="utf-8").splitlines():
+    # WHY: split on "\n" only. `splitlines()` also splits on U+2028 and similar characters,
+    # which would cut a record in the middle.
+    for line in path.read_text(encoding="utf-8").split("\n"):
         if line.strip():
             records.append(json.loads(line))
     return records

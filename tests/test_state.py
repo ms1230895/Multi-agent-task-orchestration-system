@@ -66,3 +66,10 @@ def test_ac3_agent_state_annotations_match_spec_fields() -> None:
     # WHY: the field list is documented in the spec and CLAUDE.md; drift must be noticed.
     assert set(AgentState.__annotations__) == EXPECTED_FIELDS
     assert len(AgentState.__annotations__) == 15
+
+
+@pytest.mark.parametrize("task", [None, 123, ["a"], b"bytes"])
+def test_review_initial_state_non_string_task_raises_value_error(task: object) -> None:
+    # WHY: `run_task` turns this into one failed run; an AttributeError would escape it.
+    with pytest.raises(ValueError, match="string"):
+        initial_state(task, "r1")  # type: ignore[arg-type]

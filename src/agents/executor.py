@@ -32,6 +32,9 @@ MAX_CONTEXT_CHARS = 1000
 MAX_LOG_ITEM_CHARS = 150
 MAX_TOOL_LOG_CHARS = 1500
 NO_TOOLS_TEXT = "(no tools called)"
+OMITTED_TEXT = "(earlier calls omitted)"
+# NOTE: equal to `validation.MAX_LOGGED_NAME_CHARS`: a tool name is cut the same way everywhere.
+MAX_LOG_NAME_CHARS = 100
 
 ITERATION_LIMIT_OUTPUT = "Step not completed: tool iteration limit reached."
 EMPTY_REPLY_OUTPUT = "Step not completed: the executor gave an empty reply."
@@ -75,26 +78,49 @@ def _build_messages(state: AgentState) -> list[BaseMessage]:
     return [SystemMessage(EXECUTOR_SYSTEM_PROMPT), HumanMessage(text)]
 
 
-def _log_line(name: Any, args: Any, outcome: str) -> str:
+def _one_line(value: Any, limit: int) -> str:
+    """Turn any value into one line of text of at most `limit` characters.
+
+    WHY: a tool result can hold newlines, and a line in the tool log that the result wrote
+    itself would look like a real log entry to the critic. `split()` with no argument breaks
+    on every kind of whitespace (newline, tab, U+2028, ...), so one call is always one line.
+    """
+    return trim(" ".join(str(value).split()), limit)
+
+
+def _log_line(name: Any, args: Any, outcome: Any) -> str:
     """Return one line of the tool log: `name(args) -> outcome`, each part cut short.
 
     WHY: the name and arguments come from the LLM and the outcome from a tool, so any of them
-    can be long or odd. `default=str` means odd argument types never raise.
+    can be long, odd, or hold newlines. `default=str` means odd argument types never raise,
+    and `ensure_ascii=False` keeps non-English text readable inside the character budget.
     """
-    args_text = args if isinstance(args, str) else json.dumps(args, default=str)
+    args_text = args if isinstance(args, str) else json.dumps(args, default=str, ensure_ascii=False)
     return (
-        f"{trim(str(name), 100)}({trim(args_text, MAX_LOG_ITEM_CHARS)}) -> "
-        f"{trim(outcome, MAX_LOG_ITEM_CHARS)}"
+        f"{_one_line(name, MAX_LOG_NAME_CHARS)}({_one_line(args_text, MAX_LOG_ITEM_CHARS)}) -> "
+        f"{_one_line(outcome, MAX_LOG_ITEM_CHARS)}"
     )
 
 
 def _tool_log_text(lines: list[str]) -> str:
-    """Join the log lines for the critic, cut to `MAX_TOOL_LOG_CHARS`.
+    """Join the log lines for the critic, keeping the newest calls when the log is too long.
 
-    WHY: an explicit "(no tools called)" lets the critic tell "no tool was needed" from "the
-    log is missing".
+    WHY: the critic must see the last call (for example the `write_file` of a step). Cutting
+    the end of the text would hide exactly that call, so whole old lines are dropped instead.
+    An explicit "(no tools called)" lets the critic tell "no tool was needed" from "the log is
+    missing".
     """
-    return trim("\n".join(lines), MAX_TOOL_LOG_CHARS) if lines else NO_TOOLS_TEXT
+    if not lines:
+        return NO_TOOLS_TEXT
+    kept: list[str] = []
+    total = 0
+    for line in reversed(lines):
+        total += len(line) + 1
+        if total > MAX_TOOL_LOG_CHARS and kept:
+            kept.append(OMITTED_TEXT)
+            break
+        kept.append(line)
+    return trim("\n".join(reversed(kept)), MAX_TOOL_LOG_CHARS)
 
 
 def _run_calls(
@@ -135,7 +161,7 @@ def _run_calls(
                 status="success" if result["ok"] else "error",
             )
         )
-        outcome = f"ok: {result['output']}" if result["ok"] else f"error: {result['error']}"
+        outcome = f"ok: {result['output'] or ''}" if result["ok"] else f"error: {result['error']}"
         log_lines.append(_log_line(name, args, outcome))
     return messages, log_lines
 

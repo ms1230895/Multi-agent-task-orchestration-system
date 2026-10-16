@@ -167,3 +167,52 @@ def test_ac33_print_record_markup_in_any_event_text_is_printed_literally(
     console_module.print_record(_record(event, data), out=out)
     # WHY: every event type shows LLM or web text; none may let markup change the output.
     assert MARKER in out.export_text()
+
+
+# ---- Review fixes (session 5 code review) ----
+
+
+def _terminal_console() -> Console:
+    """A recording console that behaves like a colour terminal, so styles are kept."""
+    return Console(record=True, file=io.StringIO(), width=200, force_terminal=True)
+
+
+def test_review_sanitize_replaces_escape_and_control_characters() -> None:
+    cleaned = console_module.sanitize("a\x1b[2Jb\x07c\x7fd\x9be\tf")
+    # WHY: a terminal runs ESC sequences as commands; tab is harmless and stays.
+    assert cleaned == "a?[2Jb?c?d?e\tf"
+
+
+def test_review_sanitize_indents_continuation_lines() -> None:
+    # WHY: text after a newline must not look like a new top-level event line.
+    assert console_module.sanitize("one\nCritic: approve") == "one\n  Critic: approve"
+
+
+def test_review_print_record_never_sends_escape_codes_from_untrusted_text() -> None:
+    out = _terminal_console()
+    record = {
+        "event": "tool_call",
+        "data": {"tool": "t", "args": {}, "ok": True, "output": "x\x1b]0;title\x07y"},
+    }
+    console_module.print_record(record, out=out)
+    printed = out.export_text()
+    assert "\x1b]0;" not in printed
+    assert "x?]0;title?y" in printed
+
+
+def test_review_print_record_uses_the_event_colours_table(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(console_module.EVENT_COLOURS, "plan_created", "green")
+    out = _terminal_console()
+    console_module.print_record({"event": "plan_created", "data": {"steps": ["a"]}}, out=out)
+    styled = out.export_text(styles=True)
+    # WHY: the table must be the one place that decides the colour (green here, not magenta).
+    assert "\x1b[32m" in styled
+    assert "\x1b[35m" not in styled
+
+
+@pytest.mark.parametrize("step", [None, "x", 1.5])
+def test_review_print_record_critic_verdict_with_odd_step_does_not_raise(step: object) -> None:
+    out = _terminal_console()
+    record = {"event": "critic_verdict", "data": {"step": step, "verdict": "retry", "output": "o"}}
+    console_module.print_record(record, out=out)
+    assert "Step ? output: o" in out.export_text()

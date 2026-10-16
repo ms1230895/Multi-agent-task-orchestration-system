@@ -521,3 +521,69 @@ def test_ac34_source_has_no_model_name_and_does_not_read_the_environment(module:
     # WHY: Hard rule 2 (model name only from config) and "config is the only place that reads .env".
     for forbidden in ("gpt-oss", "gemma", "os.environ", "getenv", "load_dotenv"):
         assert forbidden not in source, forbidden
+
+
+# ---- Review fixes (session 5 code review) ----
+
+
+@pytest.mark.parametrize("task", [None, 123, ["a task"]])
+def test_review_run_task_non_string_task_fails_without_raising(tmp_path: Path, task: Any) -> None:
+    llm = _happy_llm()
+    state = _run(tmp_path, llm, task=task)
+    records = _trace(tmp_path, state)
+    # WHY: a bad entry in a benchmark file must give one failed run, not stop the whole loop.
+    assert llm.calls == []
+    assert state["status"] == "failed"
+    assert state["error"].startswith("ValueError")
+    assert [r["event"] for r in records] == ["run_end"]
+
+
+def test_review_replan_path_end_to_end_emits_replan_with_the_critic_feedback(
+    tmp_path: Path,
+) -> None:
+    settings = load_settings({"OLLAMA_MODEL": "fake-model", "MAX_RETRIES": "0", "MAX_REPLANS": "1"})
+    llm = RecordingFakeLLM(
+        planner_replies=[_plan("first plan"), _plan("second plan")],
+        critic_replies=[_verdict("retry", "fix it"), _verdict("approve", "ok")],
+        executor_replies=[AIMessage("first try"), AIMessage("second try")],
+    )
+    state = _run(tmp_path, llm, settings=settings)
+    records = _trace(tmp_path, state)
+    events = [r["event"] for r in records]
+    # WHY: this is the real interplay: `advance` keeps the feedback, the planner reads it as
+    # the replan reason, and `replans > 0` picks the `replan` event instead of `plan_created`.
+    assert events == ["plan_created", "critic_verdict", "replan", "critic_verdict", "run_end"]
+    replan = next(r for r in records if r["event"] == "replan")["data"]
+    assert replan["reason"] == "fix it"
+    assert replan["replans"] == 1
+    assert replan["steps"] == ["second plan"]
+    assert state["status"] == "done"
+    assert _run_end(records)["counters"]["replans"] == 1
+
+
+@pytest.mark.parametrize(
+    ("data", "key"),
+    [
+        ({"kind": "tool"}, "tool_retries"),
+        ({"kind": "step"}, "step_retries"),
+    ],
+)
+def test_review_count_event_splits_retries_by_kind(data: dict[str, Any], key: str) -> None:
+    counters: dict[str, int] = dict.fromkeys(COUNTER_KEYS, 0)
+    run_module._count_event(counters, "retry", data)
+    # WHY: the two kinds of retry are different metrics; mixing them would hide the gate's work.
+    assert counters[key] == 1
+    assert sum(counters.values()) == 1
+
+
+def test_review_main_sanitizes_the_final_answer(monkeypatch: pytest.MonkeyPatch) -> None:
+    state = initial_state("t", "20261016-000000-aaaaaa")
+    state.update(status="done", final_answer="ok\x1b[2J\nCritic: approve")
+    buffer = io.StringIO()
+    monkeypatch.setattr(run_module, "console", Console(file=buffer, width=200))
+    monkeypatch.setattr(run_module, "run_task", lambda task, on_record=None: state)
+    assert main(["task"]) == 0
+    printed = buffer.getvalue()
+    # WHY: LLM and web text must not be able to send terminal commands or fake a line.
+    assert "\x1b" not in printed
+    assert "\n  Critic: approve" in printed

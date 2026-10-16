@@ -237,5 +237,32 @@ def test_ac35_validation_uses_the_logger_helpers() -> None:
     from src import logger
 
     # WHY: validation must import the shared helpers, not keep its own versions.
-    assert validation_module.trim is logger.trim
-    assert validation_module.emit_safely is logger.emit_safely
+    # NOTE: `vars()` reads the module namespace, so the type checker needs no re-export.
+    names = vars(validation_module)
+    assert names["trim"] is logger.trim
+    assert names["emit_safely"] is logger.emit_safely
+
+
+# ---- Review fixes (session 5 code review) ----
+
+
+def test_review_line_separator_characters_in_data_do_not_split_a_record(tmp_path: Path) -> None:
+    logger = _logger(tmp_path)
+    text = "a b c\u0085d"
+    logger.log("tool_call", {"output": text})
+    logger.log("run_end", {})
+    raw = logger.path.read_text(encoding="utf-8")
+    # WHY: web text often holds U+2028; a raw one would let a reader cut the record in half.
+    assert " " not in raw
+    assert len(raw.splitlines()) == 2
+    records = read_trace(logger.path)
+    assert records[0]["data"]["output"] == text
+    assert [r["event"] for r in records] == ["tool_call", "run_end"]
+
+
+def test_review_lone_surrogate_does_not_lose_the_line(tmp_path: Path) -> None:
+    logger = _logger(tmp_path)
+    logger.log("run_end", {"final_answer": "bad \ud800 text"})
+    # WHY: a line dropped here could be the `run_end`, and the run would not be counted.
+    assert logger.write_errors == 0
+    assert len(read_trace(logger.path)) == 1

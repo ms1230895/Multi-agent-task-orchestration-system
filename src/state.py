@@ -52,9 +52,12 @@ def initial_state(task: str, run_id: str) -> AgentState:
         A state with every field set, so no node has to guess a missing key.
 
     Raises:
-        ValueError: if the task is empty or longer than `MAX_TASK_CHARS`.
+        ValueError: if the task is not a string, is empty, or is longer than `MAX_TASK_CHARS`.
     """
-    # WHY: refuse a bad task here, before any prompt is built or any LLM call is made.
+    # WHY: refuse a bad task here, before any prompt is built or any LLM call is made. A
+    # benchmark file with a number or null as the task must give one failed run, not a crash.
+    if not isinstance(task, str):
+        raise ValueError("task must be a string")
     task = task.strip()
     if not task:
         raise ValueError("task must not be empty")

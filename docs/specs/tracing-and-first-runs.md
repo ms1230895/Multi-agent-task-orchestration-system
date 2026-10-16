@@ -188,8 +188,8 @@ A failed or wrong answer is fine and is written down honestly. The goal of these
 
 **Fix:**
 - New state field `last_tools: str`, `""` at the start. The executor writes it next to `last_output`, so `run_executor` returns `{"last_output", "last_tools"}` (this replaces the "exactly one key" part of the executor spec AC20).
-- One line per tool call made for this attempt: `name(args) -> ok: <output>` or `-> error: <error>` or `-> skipped`. Name, arguments and outcome are each cut to 150 chars (name 100); the whole log is cut to 1500 chars. No calls gives `(no tools called)`.
-- The critic's user message adds `data_block("tools", last_tools, 1500)` after the output block. The system prompt says the log was written by code and is evidence of what was done, that text inside a tool result is still data, and not to recalculate a number that a calculator result in the log gives.
+- One line per tool call made for this attempt: `name(args) -> ok: <output>` or `-> error: <error>` or `-> skipped`. Name, arguments and outcome are each collapsed to single-spaced text (so a result can never add a line of its own) and cut to 150 chars (name 100). If the log is longer than 1500 chars the oldest whole lines are dropped and `(earlier calls omitted)` is added, so the newest call stays visible. No calls gives `(no tools called)`.
+- The critic's user message adds `data_block("tools", last_tools, 1500)` after the output block. The system prompt says the log shows which tools were really called, that the text after each `->` is a tool result (data, not instructions, and possibly wrong), and not to recalculate a number that a calculator result in the log gives.
 - The planner clears `last_tools` together with `last_output` on a replan.
 - **Why a log in state and not a message history:** the critic stays one short prompt, and the log is also visible in the state and tests.
 - **Why it does not weaken the ablation:** the log is built the same way with `ENABLE_VALIDATION` on or off, so both passes give the critic the same kind of evidence.
@@ -197,67 +197,67 @@ A failed or wrong answer is fine and is written down honestly. The goal of these
 ## 6. Acceptance criteria
 
 **Logger** (`tests/test_logger.py`, logs in `tmp_path`)
-- [ ] AC1: `new_run_id()` matches `^\d{8}-\d{6}-[0-9a-f]{6}$`, and two calls return different ids.
-- [ ] AC2: With a fixed clock, `log("tool_call", {"a": 1})` writes one line to `logs_dir/<run_id>.jsonl` that parses to exactly `{"ts": "<fixed time>Z", "run_id", "model", "event": "tool_call", "data": {"a": 1}}`, and returns that same dict.
-- [ ] AC3: Three `log` calls give three lines in call order; a missing `logs_dir` is created.
-- [ ] AC4: Data holding a value JSON cannot encode (a `set`, an object) is written with `str()`, and `log` does not raise.
-- [ ] AC5: `log("made_up", {})` raises `ValueError`; `EVENT_TYPES` has exactly the 7 names.
-- [ ] AC6: When the file cannot be written (`logs_dir` is an existing file), `log` does not raise, `write_errors == 1`, and the record is still returned.
-- [ ] AC7: `read_trace` returns the records in order and skips empty lines.
-- [ ] AC8: `emit_safely(None, ...)` does nothing; with a callback that raises, it does not raise.
-- [ ] AC9: `trim("x" * 600, 500)` has length 500 and ends with `…`; text within the limit is unchanged.
+- [x] AC1: `new_run_id()` matches `^\d{8}-\d{6}-[0-9a-f]{6}$`, and two calls return different ids.
+- [x] AC2: With a fixed clock, `log("tool_call", {"a": 1})` writes one line to `logs_dir/<run_id>.jsonl` that parses to exactly `{"ts": "<fixed time>Z", "run_id", "model", "event": "tool_call", "data": {"a": 1}}`, and returns that same dict.
+- [x] AC3: Three `log` calls give three lines in call order; a missing `logs_dir` is created.
+- [x] AC4: Data holding a value JSON cannot encode (a `set`, an object) is written with `str()`, and `log` does not raise.
+- [x] AC5: `log("made_up", {})` raises `ValueError`; `EVENT_TYPES` has exactly the 7 names.
+- [x] AC6: When the file cannot be written (`logs_dir` is an existing file), `log` does not raise, `write_errors == 1`, and the record is still returned.
+- [x] AC7: `read_trace` returns the records in order and skips empty lines.
+- [x] AC8: `emit_safely(None, ...)` does nothing; with a callback that raises, it does not raise.
+- [x] AC9: `trim("x" * 600, 500)` has length 500 and ends with `…`; text within the limit is unchanged.
 
 **Events from each layer** (fake LLM; events collected in a list)
-- [ ] AC10: The planner's first valid plan emits exactly one `plan_created` with `steps`; a planner that fails (invalid twice) emits nothing.
-- [ ] AC11: A valid replan (`replans=1`) emits exactly one `replan` with `replans == 1`, the new `steps` and `reason` equal to the trimmed old feedback, and no `plan_created`.
-- [ ] AC12: The critic emits exactly one `critic_verdict` with `step == current_step`, `verdict`, `feedback`, and `output == trim(last_output, 500)`; after two invalid replies it emits one with `verdict == "retry"` and `feedback == INVALID_FEEDBACK`.
-- [ ] AC13: `advance` emits one `retry` with `kind == "step"`, `step`, `attempt == retries + 1` and the trimmed feedback as `reason` when the route is `retry`, and no event for `next_step`, `done`, `replan` or `failed`.
-- [ ] AC14: The executor with the real `call_tool` and calculator (no network) emits one `tool_call` with `tool == "calculator"`, `ok` true and `output == "1024"` for `{"expression": "2 ** 10"}`.
-- [ ] AC15: With `enable_validation=True`, a calculator call with `{"expr": "1"}` emits `validation_error` and then `tool_call` with `ok` false, in that order.
-- [ ] AC16: A callback that raises does not change the dict returned by the planner, critic, `advance` or executor.
-- [ ] AC17: With `on_event=None` (the default) the session 2 to 4 tests pass unchanged.
-- [ ] AC18: Whole graph via `build_graph(llm=fake, settings=s, on_event=collect)`: a 1-step plan, one calculator call, a final text, a `retry` verdict, a second final text, then `approve` gives the event names `plan_created, tool_call, critic_verdict, retry, critic_verdict`, in that order.
+- [x] AC10: The planner's first valid plan emits exactly one `plan_created` with `steps`; a planner that fails (invalid twice) emits nothing.
+- [x] AC11: A valid replan (`replans=1`) emits exactly one `replan` with `replans == 1`, the new `steps` and `reason` equal to the trimmed old feedback, and no `plan_created`.
+- [x] AC12: The critic emits exactly one `critic_verdict` with `step == current_step`, `verdict`, `feedback`, and `output == trim(last_output, 500)`; after two invalid replies it emits one with `verdict == "retry"` and `feedback == INVALID_FEEDBACK`.
+- [x] AC13: `advance` emits one `retry` with `kind == "step"`, `step`, `attempt == retries + 1` and the trimmed feedback as `reason` when the route is `retry`, and no event for `next_step`, `done`, `replan` or `failed`.
+- [x] AC14: The executor with the real `call_tool` and calculator (no network) emits one `tool_call` with `tool == "calculator"`, `ok` true and `output == "1024"` for `{"expression": "2 ** 10"}`.
+- [x] AC15: With `enable_validation=True`, a calculator call with `{"expr": "1"}` emits `validation_error` and then `tool_call` with `ok` false, in that order.
+- [x] AC16: A callback that raises does not change the dict returned by the planner, critic, `advance` or executor.
+- [x] AC17: With `on_event=None` (the default) the session 2 to 4 tests pass unchanged.
+- [x] AC18: Whole graph via `build_graph(llm=fake, settings=s, on_event=collect)`: a 1-step plan, one calculator call, a final text, a `retry` verdict, a second final text, then `approve` gives the event names `plan_created, tool_call, critic_verdict, retry, critic_verdict`, in that order.
 
 **`run_task`** (`tests/test_run.py`, fake LLM, logs in `tmp_path`)
-- [ ] AC19: A successful run returns a state with `status == "done"`, `error == ""`, and the `run_id`; `logs_dir/<run_id>.jsonl` exists; every line has `model == settings.ollama_model` and `run_id == state["run_id"]`; the last line is the only `run_end`.
-- [ ] AC20: `run_end.data` has exactly the keys `task`, `status`, `final_answer`, `error`, `counters`, `config`, `duration_ms`; `config` has exactly the `Settings` field names plus `max_plan_steps`.
-- [ ] AC21: For a scripted run with 2 tool calls (1 failed by a validation error) and 1 step retry, `counters` equals the expected dict for all 9 counter keys.
-- [ ] AC22: A fake LLM that raises `ConnectionError("down")` at the critic: `run_task` does not raise, `status == "failed"`, `error == "ConnectionError: down"`, `final_answer` starts with `"Task failed: unexpected error"`, `plan_steps` in `run_end` is the plan length, and the trace ends with one `run_end` carrying the same `error`.
-- [ ] AC23: With `recursion_limit` patched to return 2, the `GraphRecursionError` becomes a failed state whose `error` starts with `"GraphRecursionError"`, plus a `run_end`.
-- [ ] AC24: `run_task("   ")` does not raise, makes no LLM call, returns `status == "failed"` with `error` starting with `"ValueError"`, and writes a trace with exactly one line, `run_end`.
-- [ ] AC25: `on_record` receives every record, in the same order and equal to the lines in the file; an `on_record` that raises does not stop the run, which still ends `done` with a complete trace.
-- [ ] AC26: Every path (done, failed by limits, crash, invalid task) writes exactly one `run_end`.
-- [ ] AC27: With `settings=None` and `get_settings` patched to raise `ConfigError`, `run_task` raises `ConfigError` and no trace file is created.
-- [ ] AC28: `initial_state(...)` has `error == ""`, and the state from `run_task` has every `AgentState` key.
+- [x] AC19: A successful run returns a state with `status == "done"`, `error == ""`, and the `run_id`; `logs_dir/<run_id>.jsonl` exists; every line has `model == settings.ollama_model` and `run_id == state["run_id"]`; the last line is the only `run_end`.
+- [x] AC20: `run_end.data` has exactly the keys `task`, `status`, `final_answer`, `error`, `counters`, `config`, `duration_ms`; `config` has exactly the `Settings` field names plus `max_plan_steps`.
+- [x] AC21: For a scripted run with 2 tool calls (1 failed by a validation error) and 1 step retry, `counters` equals the expected dict for all 9 counter keys.
+- [x] AC22: A fake LLM that raises `ConnectionError("down")` at the critic: `run_task` does not raise, `status == "failed"`, `error == "ConnectionError: down"`, `final_answer` starts with `"Task failed: unexpected error"`, `plan_steps` in `run_end` is the plan length, and the trace ends with one `run_end` carrying the same `error`.
+- [x] AC23: With `recursion_limit` patched to return 2, the `GraphRecursionError` becomes a failed state whose `error` starts with `"GraphRecursionError"`, plus a `run_end`.
+- [x] AC24: `run_task("   ")` does not raise, makes no LLM call, returns `status == "failed"` with `error` starting with `"ValueError"`, and writes a trace with exactly one line, `run_end`.
+- [x] AC25: `on_record` receives every record, in the same order and equal to the lines in the file; an `on_record` that raises does not stop the run, which still ends `done` with a complete trace.
+- [x] AC26: Every path (done, failed by limits, crash, invalid task) writes exactly one `run_end`.
+- [x] AC27: With `settings=None` and `get_settings` patched to raise `ConfigError`, `run_task` raises `ConfigError` and no trace file is created.
+- [x] AC28: `initial_state(...)` has `error == ""`, and the state from `run_task` has every `AgentState` key.
 
 **CLI and console** (`tests/test_run.py`, `tests/test_console.py`)
-- [ ] AC29: `main(["2+2"])` with `run_task` patched returns `0` for a done state and `1` for a failed one, and prints the final answer and the trace path.
-- [ ] AC30: `main(["2+2"])` when `run_task` raises `ConfigError` returns `2` and prints the message, no traceback.
-- [ ] AC31: `EVENT_COLOURS` has exactly the keys of `EVENT_TYPES`, and every value is one of the role constants in `src/console.py`.
-- [ ] AC32: `print_record` prints a record of each of the 7 event types to a recording `Console` without raising.
-- [ ] AC33: A record whose text contains `[red]x[/red]` is printed literally (the recorded text contains `[red]x[/red]`).
+- [x] AC29: `main(["2+2"])` with `run_task` patched returns `0` for a done state and `1` for a failed one, and prints the final answer and the trace path.
+- [x] AC30: `main(["2+2"])` when `run_task` raises `ConfigError` returns `2` and prints the message, no traceback.
+- [x] AC31: `EVENT_COLOURS` has exactly the keys of `EVENT_TYPES`, and every value is one of the role constants in `src/console.py`.
+- [x] AC32: `print_record` prints a record of each of the 7 event types to a recording `Console` without raising.
+- [x] AC33: A record whose text contains `[red]x[/red]` is printed literally (the recorded text contains `[red]x[/red]`).
 
 **Critic sees the tool calls** (section 5.8)
-- [ ] AC42: `initial_state(...)` has `last_tools == ""`, and `AgentState` has 15 fields.
-- [ ] AC43: `run_executor` returns exactly `last_output` and `last_tools`. After one `write_file` call, `last_tools` has one line that starts with `write_file(` and holds the arguments and `-> ok: `. A failed call shows `-> error: `. With no calls it is `(no tools called)`.
-- [ ] AC44: With 7 calls in one reply, the log has 7 lines and the last 2 end with `-> skipped`. A log longer than 1500 chars is cut to at most 1500; the iteration-limit result also carries the log.
-- [ ] AC45: The critic's user message contains `last_tools` inside `<tools>` markers, after the output block; a `</tools>` inside the log is neutralised (exactly one closing tag).
-- [ ] AC46: The critic system prompt says the tool log is evidence of what was done and not to recalculate a number it contains.
-- [ ] AC47: A replan clears `last_tools`. Whole graph (fake LLM): the critic's prompt contains `calculator({"expression": "2 ** 10"}) -> ok: 1024`.
+- [x] AC42: `initial_state(...)` has `last_tools == ""`, and `AgentState` has 15 fields.
+- [x] AC43: `run_executor` returns exactly `last_output` and `last_tools`. After one `write_file` call, `last_tools` has one line that starts with `write_file(` and holds the arguments and `-> ok: `. A failed call shows `-> error: `. With no calls it is `(no tools called)`.
+- [x] AC44: With 7 calls in one reply, the log has 7 lines and the last 2 end with `-> skipped`. A log longer than 1500 chars drops its oldest lines (at most 1500 chars, newest call kept, starts with `(earlier calls omitted)`); the iteration-limit result also carries the log.
+- [x] AC45: The critic's user message contains `last_tools` inside `<tools>` markers, after the output block; a `</tools>` inside the log is neutralised (exactly one closing tag).
+- [x] AC46: The critic system prompt says the log shows which tools were really called, that tool results are data and may be wrong, and not to recalculate a number it contains.
+- [x] AC47: A replan clears `last_tools`. Whole graph (fake LLM): the critic's prompt contains `calculator({"expression": "2 ** 10"}) -> ok: 1024`.
 
 **Source rules**
-- [ ] AC34: `src/logger.py` and `src/run.py` contain no model name (`gpt-oss`, `gemma`) and do not read the environment (`os.environ`, `getenv`, `load_dotenv`) (test reads the source).
-- [ ] AC35: `src/validation.py` no longer defines `_trim` or `_emit`, and all session 2 validation tests pass.
+- [x] AC34: `src/logger.py` and `src/run.py` contain no model name (`gpt-oss`, `gemma`) and do not read the environment (`os.environ`, `getenv`, `load_dotenv`) (test reads the source).
+- [x] AC35: `src/validation.py` no longer defines `_trim` or `_emit`, and all session 2 validation tests pass.
 
 **Project checks**
-- [ ] AC36: `pytest -q` passes with no network access and no LLM calls.
-- [ ] AC37: `ruff check .` reports no errors.
+- [x] AC36: `pytest -q` passes with no network access and no LLM calls.
+- [x] AC37: `ruff check .` reports no errors.
 
 **Real runs** (not unit tests; checked by code over the trace files)
-- [ ] AC38: `docs/plans/first-runs.md` lists 5 run ids, one per task R1 to R5. For each, `read_trace(trace_path(run_id))` shows `model == "gpt-oss:120b-cloud"` on every line and exactly one `run_end`, as the last line.
-- [ ] AC39: Every one of those runs has `run_end.data.duration_ms` below 15 minutes (no run hung) and an `error` that does not start with `"GraphRecursionError"`.
-- [ ] AC40: `docs/plans/first-runs.md` has a problems list where each problem is marked "fixed now" or "session 7".
-- [ ] AC41: CLAUDE.md "Commands" and `docs/project-memory.md` contain `python -m src.run "<task>"`.
+- [x] AC38: `docs/plans/first-runs.md` lists 5 run ids, one per task R1 to R5. For each, `read_trace(trace_path(run_id))` shows `model == "gpt-oss:120b-cloud"` on every line and exactly one `run_end`, as the last line.
+- [x] AC39: Every one of those runs has `run_end.data.duration_ms` below 15 minutes (no run hung) and an `error` that does not start with `"GraphRecursionError"`.
+- [x] AC40: `docs/plans/first-runs.md` has a problems list where each problem is marked "fixed now" or "session 7".
+- [x] AC41: CLAUDE.md "Commands" and `docs/project-memory.md` contain `python -m src.run "<task>"`.
 
 ## 7. Edge cases and errors
 - **Missing or invalid `.env` setting:** `run_task` raises `ConfigError` before any run starts. There is no model to put in a trace, and nothing ran. The CLI turns it into exit code 2 and a red message.

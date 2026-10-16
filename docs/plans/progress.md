@@ -1,10 +1,10 @@
 # Progress
 
 ## Status
-- **Phase:** Build (roadmap session 5 of 9 next)
-- **Last completed:** Session 4, executor: done (367 tests pass; code review found 0 Critical, Warnings and Suggestions not yet fixed; `docs/plans/executor-plan.md`, decisions D16-D22 in `docs/plans/decisions.md`)
-- **Next:** Session 5, tracing-and-first-runs (spec: opus, high; implementation: sonnet, medium)
-- **Session 5, tracing-and-first-runs:** Implemented and tested (487 tests pass), next: /code-review (spec `docs/specs/tracing-and-first-runs.md`, plan `docs/plans/tracing-and-first-runs-plan.md`, first runs `docs/plans/first-runs.md`, decisions D23-D30)
+- **Phase:** Build (roadmap session 6 of 9 next)
+- **Last completed:** Session 5, tracing-and-first-runs: done (510 tests pass; code review found 0 Critical, 8 Warnings fixed, Suggestions deferred in D31; `docs/plans/tracing-and-first-runs-plan.md`, `docs/plans/first-runs.md`, decisions D23-D31)
+- **Next:** Session 6, benchmark (spec: opus, high; implementation: sonnet, medium)
+- **Session 5, tracing-and-first-runs:** Reviewed and fixed, ready for /git-feature
 
 ## Done
 - [x] Project folder and `.claude/` skeleton

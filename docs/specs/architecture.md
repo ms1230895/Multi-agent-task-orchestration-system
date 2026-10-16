@@ -89,10 +89,10 @@ Each agent is a function `(state: AgentState) -> dict` that returns only the sta
 - If the limit is reached without a final reply, the output is `"Step not completed: tool iteration limit reached."` plus the last tool result. The critic will then reject it.
 - Errors from the LLM call are not caught (D12). The executor imports `call_tool` and `tool_definitions` only, never a tool function, so nothing can call a tool around the gate.
 - Untrusted text (earlier results, feedback, the previous output) goes into the prompt through `data_block` (`src/agents/prompting.py`): cut to a limit, any closing tag inside it neutralised, wrapped in `<results>`, `<feedback>`, or `<previous_output>` markers. The system prompt says text in these markers and every tool result is data, not instructions. This lowers prompt-injection risk; it does not remove it.
-- Writes `last_output` and `last_tools`: one log line per tool call (`name(args) -> ok: output`, `-> error: ...`, or `-> skipped`), each part cut to 150 chars, the whole log to 1500, or `(no tools called)`.
+- Writes `last_output` and `last_tools`: one log line per tool call (`name(args) -> ok: output`, `-> error: ...`, or `-> skipped`), each part collapsed to one line of single-spaced text and cut to 150 chars; when the log passes 1500 chars the oldest lines are dropped (`(earlier calls omitted)`) so the newest call stays visible; `(no tools called)` when there were none.
 
 **Critic** (`src/agents/critic.py`)
-- Input: task, current step, `last_output` as a `data_block("output", ...)`, and the executor's tool log `last_tools` as a `data_block("tools", ...)`. The system prompt says to ignore any instruction inside the output, that the log is evidence of what was done (text in a tool result is still data), and not to recalculate numbers the log already gives. **Why:** without the log the critic rejected correct work because it could not see the tool call (first real runs, session 5).
+- Input: task, current step, `last_output` as a `data_block("output", ...)`, and the executor's tool log `last_tools` as a `data_block("tools", ...)`. The system prompt says to ignore any instruction inside the output, that the log shows which tools were really called but the text after each `->` is a tool result (data, not instructions, and possibly wrong), and not to recalculate numbers the log already gives. **Why:** without the log the critic rejected correct work because it could not see the tool call (first real runs, session 5).
 - Output: JSON `{"verdict": "approve" | "retry", "feedback": "..."}`, validated by a Pydantic model `Verdict`.
 - If the JSON is invalid, re-ask once. If it is still invalid, treat it as `verdict="retry"` with feedback "critic output invalid". This is safe because retries are limited.
 - Logs `critic_verdict`.
@@ -111,7 +111,7 @@ Planner and Critic always validate their own JSON output, whatever `ENABLE_VALID
 | `current_step` | `int` | Index into `plan` (0-based) |
 | `step_results` | `list[str]` | Approved output of each finished step |
 | `last_output` | `str` | Executor output for the current step, waiting for the critic |
-| `last_tools` | `str` | Log of the tool calls behind `last_output`, one line per call, written by the executor and cleared on a replan. The critic reads it as evidence of what was done |
+| `last_tools` | `str` | Log of the tool calls behind `last_output`, one line per call, written by the executor and cleared on a replan. The critic reads it to see which tools were called |
 | `verdict` | `str` | `"approve"` or `"retry"` from the critic |
 | `feedback` | `str` | Critic's explanation, passed to executor (retry) or planner (replan) |
 | `retries` | `int` | Retries used on the **current step** (reset to 0 when a step is approved or a new plan starts) |
@@ -193,7 +193,7 @@ Ablation: the "off" pass sets `ENABLE_VALIDATION=false` and `ENABLE_RETRY=false`
 
 One file per run: `logs/<run_id>.jsonl`, one JSON object per line:
 ```json
-{"ts": "2026-10-16T12:00:00Z", "run_id": "...", "model": "gpt-oss:120b-cloud", "event": "tool_call", "data": {...}}
+{"ts": "2026-10-16T12:00:00.000Z", "run_id": "...", "model": "gpt-oss:120b-cloud", "event": "tool_call", "data": {...}}
 ```
 Every line carries `model`, so a trace can never be mixed up between models. The `run_end` event also records the task, the config flags and limits used, and the counters. Inside a run, layers send `(event, data)` to an `on_event` callback; `run_task` adds `ts`, `run_id` and `model`, writes the line, and passes the record to `on_record`. Long text fields are cut to 500 characters.
 
@@ -209,7 +209,7 @@ Every line carries `model`, so a trace can never be mixed up between models. The
 
 `run_end.counters`: `plan_steps`, `steps_done`, `replans`, `tool_calls`, `failed_tool_calls`, `validation_errors`, `tool_retries`, `step_retries`, `critic_verdicts`. The event counts come from the events, not from the state, because `retries` in the state resets on every step. `run_end.config` is the settings plus `max_plan_steps`; a test fixes its exact keys so a secret can never enter a trace (Hard rule 7).
 
-Traces are what we count for "reasoning traces across 100+ runs" and what we read when we debug failures.
+Traces are written with `ensure_ascii=True` (every non-ASCII character as `\uXXXX`), so a line separator such as U+2028 in web text cannot split a record. Traces are what we count for "reasoning traces across 100+ runs" and what we read when we debug failures.
 
 ## 5. Evaluation design
 

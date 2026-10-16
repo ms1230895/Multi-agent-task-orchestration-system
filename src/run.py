@@ -17,7 +17,7 @@ from langchain_core.language_models import BaseChatModel
 from rich.markup import escape
 
 from src.config import LOGS_DIR, MAX_PLAN_STEPS, ConfigError, Settings, get_settings
-from src.console import ERROR, SUCCESS, console, print_record
+from src.console import ERROR, SUCCESS, console, print_record, sanitize
 from src.graph import build_graph, recursion_limit
 from src.logger import RecordCallback, TraceLogger, new_run_id, trace_path, trim
 from src.state import MAX_TASK_CHARS, AgentState, initial_state
@@ -129,7 +129,7 @@ def run_task(
         # WHY: refuse a bad task before any LLM call is spent on it; the run still gets a
         # trace with its `run_end`.
         placeholder = initial_state("(invalid task)", run_id)
-        placeholder["task"] = task[:MAX_TASK_CHARS]
+        placeholder["task"] = str(task)[:MAX_TASK_CHARS]
         state = _failed_state(placeholder, _error_text(exc))
         state["final_answer"] = f"Task failed: {exc}"
     else:
@@ -190,13 +190,18 @@ def main(argv: list[str] | None = None) -> int:
         state = run_task(args.task, on_record=print_record)
     except ConfigError as exc:
         # WHY: a setup mistake needs a short message, not a traceback.
-        console.print(escape(str(exc)), style=ERROR, highlight=False)
+        console.print(escape(sanitize(str(exc))), style=ERROR, highlight=False, emoji=False)
         return 2
 
     done = state["status"] == "done"
     console.print("")
+    # WHY: the final answer is LLM text (and can echo web text), so it is sanitized like the
+    # live events.
     console.print(
-        escape(f"Final answer: {state['final_answer']}"), style=SUCCESS if done else ERROR
+        escape(sanitize(f"Final answer: {state['final_answer']}")),
+        style=SUCCESS if done else ERROR,
+        highlight=False,
+        emoji=False,
     )
     console.print(f"Trace: {escape(str(trace_path(state['run_id'])))}", highlight=False)
     return 0 if done else 1

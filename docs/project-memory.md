@@ -54,3 +54,9 @@ No extra description: built from the roadmap entry for session 5, `docs/specs/ar
 do all the step at once don't ask again and again also remember this that while implementing just ask once at the starting saying it will include these many steps and if user says go then implement all at once without asking again and again
 ```
 Use it to build a whole plan after one go-ahead. Claude stops only on a failed check or at a step that needs you (real LLM runs, `.env`). Model: sonnet, effort medium.
+
+### 2026-10-16: Fix review findings, then merge
+```
+fix it and then merge
+```
+Said after `/code-review` listed findings and asked which to fix. Claude fixed all Warnings and deferred the Suggestions (D31); the merge itself is done by Gaurav with `/git-feature`. Model: sonnet, effort medium.
