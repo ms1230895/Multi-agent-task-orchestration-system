@@ -13,7 +13,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from src.agents.critic import run_critic
-from src.agents.executor import stub_executor
+from src.agents.executor import run_executor
 from src.agents.planner import run_planner
 from src.config import MAX_PLAN_STEPS, Settings, get_llm, get_settings
 from src.state import AgentState, Route
@@ -162,7 +162,7 @@ def build_graph(
     Args:
         llm: the chat model for planner and critic. Default: `get_llm(settings)`.
         settings: limits and flags. Default: `get_settings()`.
-        executor: the executor node. Default: `stub_executor` (session 4 replaces it).
+        executor: the executor node. Default: `run_executor` with the shared `llm`.
 
     Returns:
         A compiled graph. Invoke it with
@@ -172,7 +172,9 @@ def build_graph(
     """
     settings = settings or get_settings()
     llm = llm or get_llm(settings)
-    executor = executor or stub_executor
+    # WHY: `is not None`, not `or`, so a callable executor is never replaced by truthiness.
+    if executor is None:
+        executor = partial(run_executor, llm=llm, settings=settings)
 
     graph = StateGraph(AgentState)
 

@@ -10,7 +10,7 @@
 - [x] Step 3: Critic and planner prompt fixes
 - [x] Step 4: Test fakes (role markers, `bind_tools`, stub moved)
 - [x] Step 5: Executor loop (`src/agents/executor.py`)
-- [ ] Step 6: Graph wiring and stub removal
+- [x] Step 6: Graph wiring and stub removal
 - [ ] Step 7: Docs sync and final checks
 
 ## Overview
