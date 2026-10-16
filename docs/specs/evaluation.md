@@ -1,6 +1,6 @@
 # Spec: Evaluation
 
-**Status:** Draft
+**Status:** Approved
 **Branch:** feature/evaluation
 **Date:** 2026-10-17
 
