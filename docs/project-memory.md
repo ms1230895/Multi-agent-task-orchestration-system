@@ -95,3 +95,9 @@ go
 ya fix all 6 quickly
 ```
 Said after `/code-review` listed 0 Critical and 6 Warnings. Claude fixed all 6 Warnings and listed the Suggestions as deferred in D40. Model: sonnet, effort medium (review itself: sonnet, high).
+
+### 2026-10-17: Cap new tests at 100 (837-test baseline frozen)
+```
+I want to cap the whole test suite at 100 tests, to cut the tokens the test subagents use. [...] don't delete the test that has happened up until now, just add this now and from this point onward we will do tests in this specific way, do not delete any tests
+```
+Result: the 837 existing tests are a frozen baseline; tests added after it are capped at 100 (budget = `pytest --collect-only -q` total minus 837). Hard rule 11 in CLAUDE.md; `test-writer`, `/test`, `test-runner` and `quality-reviewer` updated. Model: sonnet, effort medium.
