@@ -76,14 +76,48 @@ class Settings(BaseModel):
         WHY: Pydantic's default also accepts words like "on" and "t". A strict list means
         a typo such as "maybe" is an error instead of silently switching an ablation flag.
         """
-        if isinstance(value, bool):
-            return value
-        word = str(value).strip().lower()
-        if word in _TRUE_WORDS:
-            return True
-        if word in _FALSE_WORDS:
-            return False
-        raise ValueError("not a boolean")
+        return _strict_bool(value)
+
+
+def _strict_bool(value: Any) -> bool:
+    """Turn true/false/1/0/yes/no (any case) into a bool; anything else raises `ValueError`.
+
+    WHY: one strict parser for every flag, so `Settings` and `UiSettings` accept the same words.
+    """
+    if isinstance(value, bool):
+        return value
+    word = str(value).strip().lower()
+    if word in _TRUE_WORDS:
+        return True
+    if word in _FALSE_WORDS:
+        return False
+    raise ValueError("not a boolean")
+
+
+class UiSettings(BaseModel):
+    """Settings of the Streamlit app, kept apart from `Settings` on purpose.
+
+    Attributes:
+        allow_live_runs: True shows the Run page, which starts real LLM runs. Default False,
+            so a copy of the app without this flag can never spend quota or run tools.
+        model_choices: the model names the Run page may offer, from `.env`. Empty when
+            `OLLAMA_MODEL` is missing, which makes the app replay-only.
+
+    WHY separate: `Settings.model_dump()` is `run_end.config` and the pass manifest's `config`.
+    A new field there would make every new pass look like a config change against the baseline
+    passes, and the report would refuse to compare them (D43).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    allow_live_runs: bool = False
+    model_choices: tuple[str, ...] = ()
+
+    @field_validator("allow_live_runs", mode="before")
+    @classmethod
+    def _parse_bool(cls, value: Any) -> Any:
+        """Use the same strict words as the other flags."""
+        return _strict_bool(value)
 
 
 def _describe_error(error: Mapping[str, Any]) -> str:
@@ -151,6 +185,51 @@ def get_settings() -> Settings:
     """
     load_dotenv(PROJECT_ROOT / ".env")
     return load_settings(os.environ)
+
+
+def load_ui_settings(env: Mapping[str, str]) -> UiSettings:
+    """Build `UiSettings` from a mapping of environment variables.
+
+    Args:
+        env: variable name to string value, for example `os.environ` or a test dict.
+
+    Returns:
+        A frozen `UiSettings`. `model_choices` is `OLLAMA_MODEL`, then `OLLAMA_MODEL_ALT` when
+        it is set and different; it is empty when `OLLAMA_MODEL` is missing.
+
+    Raises:
+        ConfigError: if `UI_ALLOW_LIVE_RUNS` is not one of the accepted words. The message
+            names the variable, never the value (Hard rule 7).
+    """
+    # STEP 1: the model names the Run page may offer.
+    # WHY: `dict.fromkeys` drops an alt that equals the main model, keeping the order. A missing
+    # main model means no safe choice exists, so the list is empty and the app is replay-only.
+    main = env.get("OLLAMA_MODEL", "").strip()
+    alt = env.get("OLLAMA_MODEL_ALT", "").strip()
+    choices = tuple(dict.fromkeys(name for name in (main, alt) if name)) if main else ()
+
+    # STEP 2: the live-runs flag. An empty value means "not set", so the default (False) applies.
+    raw: dict[str, Any] = {"model_choices": choices}
+    flag = env.get("UI_ALLOW_LIVE_RUNS", "").strip()
+    if flag:
+        raw["allow_live_runs"] = flag
+    try:
+        return UiSettings.model_validate(raw)
+    except ValidationError:
+        # WHY: Pydantic's text includes the input value; we write the message ourselves.
+        raise ConfigError(
+            "Invalid configuration: UI_ALLOW_LIVE_RUNS must be true or false"
+        ) from None
+
+
+@lru_cache(maxsize=1)
+def get_ui_settings() -> UiSettings:
+    """Load `.env` and the process environment once, and return the cached UI settings.
+
+    WHY: the same single load as `get_settings`. Tests call `get_ui_settings.cache_clear()`.
+    """
+    load_dotenv(PROJECT_ROOT / ".env")
+    return load_ui_settings(os.environ)
 
 
 def get_llm(settings: Settings | None = None) -> ChatOllama:
