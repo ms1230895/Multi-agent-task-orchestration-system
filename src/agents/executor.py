@@ -69,9 +69,7 @@ def _build_messages(state: AgentState) -> list[BaseMessage]:
     return [SystemMessage(EXECUTOR_SYSTEM_PROMPT), HumanMessage(text)]
 
 
-def _run_calls(
-    reply: Any, settings: Settings, on_event: EventCallback | None
-) -> list[ToolMessage]:
+def _run_calls(reply: Any, settings: Settings, on_event: EventCallback | None) -> list[ToolMessage]:
     """Run the tool calls of one LLM reply through the gate; answer every call id once.
 
     Args:

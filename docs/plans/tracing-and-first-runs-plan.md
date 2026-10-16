@@ -9,8 +9,8 @@
 - [x] Step 2: `error` field in `AgentState`
 - [x] Step 3: Planner and critic events
 - [x] Step 4: Executor, `advance` and graph wiring
-- [ ] Step 5: Fake LLM: an error for one role only
-- [ ] Step 6: `run_task` (`src/run.py`)
+- [x] Step 5: Fake LLM: an error for one role only
+- [x] Step 6: `run_task` (`src/run.py`)
 - [ ] Step 7: Console: `EVENT_COLOURS` and `print_record`
 - [ ] Step 8: CLI `python -m src.run`
 - [ ] Step 9: Docs sync
