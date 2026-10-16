@@ -19,6 +19,10 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 WORKSPACE_DIR = PROJECT_ROOT / "workspace"
 
+# WHY: a fixed design limit, used by the `Plan` schema and by `recursion_limit`. It stays the
+# same in every benchmark pass, so it is a constant here and not an `.env` setting.
+MAX_PLAN_STEPS = 6
+
 # WHY: error messages need the allowed range, and Pydantic's error does not carry both
 # ends. NOTE: keep this table equal to the `ge`/`le` values on `Settings`; a test checks it.
 # Upper bounds are part of Hard rule 5: a typo like MAX_RETRIES=200 must be refused,

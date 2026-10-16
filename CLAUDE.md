@@ -28,9 +28,9 @@ Report whatever numbers we actually get.
 Commands for running a task and the benchmark are added when those exist.
 
 ## Architecture in brief
-Graph: START → planner → executor → critic → router.
+Graph: START → planner → executor → critic → advance → router. If the planner fails, planner → finalize.
 Router: next step or retry → executor | replan → planner | done or limits used up → finalize → END.
-- Shared state: one TypedDict, `AgentState` (task, plan, current_step, step_results, verdict, feedback, retries, replans, status).
+- Shared state: one TypedDict, `AgentState` (task, run_id, plan, current_step, step_results, last_output, verdict, feedback, retries, replans, final_answer, status, route).
 - The router is plain Python with hard limits (MAX_RETRIES, MAX_REPLANS). The critic gives a verdict; code decides where to go.
 - Every tool call passes one validation gate: tool exists → Pydantic arguments valid → run inside try/except → return `{ok, output, error}`.
 Full detail: `docs/specs/architecture.md`. Read it before changing the structure.
