@@ -187,6 +187,17 @@ def _compute(results: list[dict[str, Any]], *, planned: int, pauses: int) -> dic
         and not isinstance(record.get("duration_ms"), bool)
     ]
     metrics["median_duration_s"] = statistics.median(durations) if durations else None
+    # WHY: a short split of the non-successes that needs no trace, so a before/after row can
+    # show whether a fix moved failures from "gave up" to "wrong answer" or the other way.
+    metrics["outcomes"] = {
+        "success": metrics["successes"],
+        "done_but_wrong": sum(
+            1 for r in results if r.get("success") is not True and r.get("status") == "done"
+        ),
+        "failed": sum(
+            1 for r in results if r.get("success") is not True and r.get("status") != "done"
+        ),
+    }
     return metrics
 
 

@@ -7,7 +7,7 @@
 ## Progress
 Part A: build the tools, run the baseline, choose the fixes
 - [x] Step 1: `evaluation/passes.py`
-- [ ] Step 2: comparisons and trace count in `evaluation/report.py`
+- [x] Step 2: comparisons and trace count in `evaluation/report.py`
 - [ ] Step 3: results block, `write_block`, report CLI
 - [ ] Step 4: `evaluation/analyze.py`, part 1 (classes, failed calls, repeats)
 - [ ] Step 5: `evaluation/analyze.py`, part 2 (rejections, limits, digests, CLI)
