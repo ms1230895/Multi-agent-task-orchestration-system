@@ -166,10 +166,10 @@ On a replan, `advance` only increments `replans`. The planner then reads the old
 - CLI: `python -m src.run "your task here"` prints the events live with `rich` (`print_record` in `src/console.py`), then the final answer and the trace path. Exit code 0 done, 1 failed, 2 configuration error.
 
 ### 2.7 Benchmark
-- `benchmark/tasks.json`: 30 tasks. Each has `id`, `category` (calc, search, file, multi-tool), `task`, `checker` (checker name), and `expected` (checker arguments).
-- `benchmark/checkers.py`: plain code, never an LLM judge (Hard rule 6). Planned checkers: `number` (with tolerance), `contains` (all / any keywords, case-insensitive), `regex`, `file_content` (a file in `workspace/` holds the expected text). Search tasks use facts that do not change over time, so the checker stays valid.
-- `benchmark/runner.py`: runs tasks through `run_task`, applies checkers, saves results (see section 5).
-- `workspace/` is reset before each task so tasks cannot affect each other.
+- `benchmark/tasks.json`: 30 tasks (8 calc, 7 search, 7 file, 8 multi-tool). Each has `id`, `category`, `task`, `setup_files` (path in `workspace/` to content, written before the task), and `checks` (1 to 3 checks; the task passes only if all pass). `benchmark/tasks.py` validates the whole file when it is loaded (paths stay inside `workspace/`, regexes compile, ids are unique, and an expected number may not appear in the task text).
+- `benchmark/checkers.py`: plain code, never an LLM judge (Hard rule 6). Four check types: `number` (any number in the text within a tolerance; thousands separators and exponents are read), `contains` (`all` / `any` / `none` keywords, whole words, case and accent insensitive), `regex`, `exact` (line-ending and blank-edge normalised). Every check can read the final answer or a file in `workspace/` (`file`), so there is no separate `file_content` checker. Search tasks use facts that do not change over time, so the checks stay valid. `benchmark/text.py` holds the number and text helpers shared by `tasks.py` and `checkers.py`.
+- `benchmark/runner.py`: runs tasks through `run_task`, applies checks, saves results (see section 5).
+- `workspace/` is emptied before each task and then filled with the task's `setup_files`, so tasks cannot affect each other.
 
 ## 3. Configuration (`.env` through `src/config.py`)
 
@@ -214,7 +214,7 @@ Traces are written with `ensure_ascii=True` (every non-ASCII character as `\uXXX
 ## 5. Evaluation design
 
 ### Metrics (defined before measuring, so we cannot move the goalposts)
-- **Task success rate** = tasks whose checker passes ÷ tasks attempted, per pass.
+- **Task success rate** = tasks that succeed ÷ tasks with a result, per pass. A task succeeds when the run's `status` is `done` **and** every check passes (`checks_passed` is stored too, so a failed run with a right answer stays visible).
 - **Failed tool call rate** = `tool_call` events with `ok=false` (after all gate retries) ÷ all `tool_call` events, per pass. We report the relative reduction from the off pass to the on pass, and also the absolute numbers.
 - **Trace count** = number of `run_end` events in `logs/`.
 
@@ -222,12 +222,14 @@ Traces are written with `ensure_ascii=True` (every non-ASCII character as `\uXXX
 A **pass** is one model + one config running all 30 tasks. The Ollama free plan has 5-hour and weekly usage caps, so a pass may have to stop and continue later.
 
 - Each pass has a folder `benchmark/results/<pass_id>/` containing:
-  - `manifest.json`: model, all config flags and limits, git commit, start time. Written once when the pass starts.
-  - `results.jsonl`: one line per finished task (`task_id`, `run_id`, `success`, `status`, checker detail, tool-call counts).
-- `python -m benchmark.runner --pass <pass_id>` starts a new pass, or resumes one that exists:
-  - On resume, the runner compares the current config (model, flags, limits) with the manifest. **If anything differs, it refuses to run.** This is how we never mix models or settings in one pass.
+  - `manifest.json`: model, all config flags and limits (the same shape as `run_end.config`), the task ids, a code fingerprint, git commit and dirty flag (information only), start time. Written once when the pass starts.
+  - `results.jsonl`: one line per finished task (`task_id`, `category`, `run_id`, `model`, `success`, `status`, `checks_passed`, `checks` with a detail each, `error`, `final_answer` cut to 500 chars, `tools_used`, the run's `counters`, `duration_ms`, `finished_at`).
+  - `paused.jsonl`: one line per run that ended in an infrastructure error (task id, run id, error text, time). No result is written for those runs.
+- `python -m benchmark.runner --pass <pass_id> [--tasks a,b] [--verbose]` starts a new pass, or resumes one that exists; `--summary` prints the summary of an existing pass without running anything:
+  - On resume, the runner compares the current model, config, task ids and **code fingerprint** (a SHA-256 over `src/**/*.py`, `benchmark/*.py` and `benchmark/tasks.json`) with the manifest. **If anything differs, it refuses to run** and names the differing fields. This is how we never mix models, settings, tasks or code versions in one pass; a fix in `src/` means a new pass id.
   - Tasks already in `results.jsonl` are skipped.
-- **Infrastructure errors are not task failures.** If Ollama returns a usage cap / rate limit / connection error, the runner stops the pass cleanly, does not write a result for that task, and prints "paused, resume later". The task runs again on resume. This keeps a usage cap from looking like an agent failure.
+  - Exit codes: 0 complete, 2 refused or invalid, 3 paused, 130 Ctrl-C.
+- **Infrastructure errors are not task failures.** If `run_task` ends with a connection error, timeout or Ollama `ResponseError` (usage cap, rate limit, server error), the runner stops the pass cleanly, writes the run to `paused.jsonl` and no result, and prints "paused, resume later". The task runs again on resume. This keeps a usage cap from looking like an agent failure. The list of error types is a guess from the client code (D35) and is checked against the first real cap.
 - Planned passes: main model off, main model on, second model on (and second model off if quota allows). Repeated passes are allowed (e.g. `main-on-2`) to reach 100+ runs and to see run-to-run variance.
 
 ## 6. Open questions

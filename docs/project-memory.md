@@ -15,6 +15,19 @@ python -m src.run "your task here"
 ```
 Runs one task with the Planner, Executor and Critic. Shows the events live in colour and writes the trace to `logs/<run_id>.jsonl`. Needs `OLLAMA_MODEL` in `.env`. Exit code 0 done, 1 failed, 2 configuration error.
 
+### Run a benchmark pass
+```bash
+python -m benchmark.runner --pass <pass_id>
+python -m benchmark.runner --pass smoke-1 --tasks calc-01,search-01,file-02
+```
+Runs the 30 tasks (or the listed ones) as one pass and saves `manifest.json`, `results.jsonl` and `paused.jsonl` in `benchmark/results/<pass_id>/`. The same command resumes a pass; it refuses if the model, settings, tasks or code changed (start a new pass id then). Exit code 0 complete, 2 refused, 3 paused (usage cap or connection error; resume later), 130 Ctrl-C. Empties `workspace/` before every task.
+
+### Show a pass summary
+```bash
+python -m benchmark.runner --pass <pass_id> --summary
+```
+Prints success rate, failed-tool-call rate and counts for an existing pass. Makes no LLM calls.
+
 ## Claude Code commands
 <!-- slash commands and subagents, with one line each on what they do -->
 

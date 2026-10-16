@@ -121,3 +121,29 @@ Added after the first real runs. The executor writes a short log of its tool cal
 
 **Deferred (not fixed, decide later):** trim nested argument values in `_loggable_args`; log an allowlist of settings instead of `model_dump()` in `run_end.config`; redact local paths and `input_value=` from exception text; check `run_id` against a pattern in `TraceLogger`; a wall-clock cap on a whole run (already the case before this branch); `read_trace` skipping a half-written last line; reporting `write_errors` in `run_end` or the CLI; event-name constants so a typo is not swallowed by `emit_safely`; `ensure_ascii` and shared constants in the executor log; tidy the failed-state code and the `on_record` try/except in `run.py`; share the test helpers `_collector` and `_broken_callback` in `tests/fakes.py` and merge the overlapping executor AC20/AC43 tests; Ctrl-C leaves a trace with no `run_end` (by design, documented). **Not changed:** `data_block` still neutralises only its own closing tag, not the other block tags.
 
+
+## Session 6: benchmark (2026-10-17)
+
+### D32. Each task has a list of `checks`, not one `checker` + `expected`
+A task holds 1 to 3 checks (`number`, `contains`, `regex`, `exact`) and passes only if all pass. Every check can read the final answer or a file in `workspace/` through its `file` field, so there is no separate `file_content` checker. **Why:** a multi-tool task often needs two facts checked (for example "the file exists and holds the right number"); a list covers that without a special checker per task. This changes architecture section 2.7, which is updated.
+
+### D33. Success = the run is `done` AND every check passes
+`checks_passed` is stored next to `success`. **Why:** a `failed` run carries "Task failed: ..." plus a partial result; the agent gave up, and counting it would make the agent look better than it is. Storing both keeps the other reading possible. Decided before any measurement so the goalposts cannot move.
+
+### D34. The code fingerprint, not the git commit, blocks a resume
+The manifest holds a SHA-256 over `src/**/*.py`, `benchmark/*.py` and `benchmark/tasks.json`; resume refuses if it differs. The git commit and a dirty flag are information only. **Why:** session 7 fixes code between passes, and results from before and after a fix must never be mixed. The commit alone would block a docs-only commit and miss uncommitted code changes. **Cost:** any edit in these files, even a comment, means a new pass id.
+
+### D35. Connection errors, timeouts and every Ollama `ResponseError` pause the pass
+`INFRA_ERROR_TYPES` in `benchmark/runner.py`. The run goes to `paused.jsonl`, no result is written, and resume runs the task again. **Why:** the agents cannot cause these errors, so they must not count as agent failures (D12, D24). The Ollama client turns `httpx.ConnectError` into `ConnectionError`, raises `ResponseError` for server errors, and lets httpx timeouts pass. **Risk:** a guess from reading the client code, like D6. A non-quota server error would also pause. Check the real text of the first usage cap in `paused.jsonl` and adjust the list.
+
+### D36. `MAX_REPLANS=1` in every pass (settles first-run problem P3)
+Gaurav's `.env` had 2; the code default and D4 say 1. The manifest records the value and resume refuses a change, so it is fixed before the first real pass. **Why:** fewer LLM calls per task under the Ollama usage caps, and one value for all passes.
+
+### D37. `benchmark/results/` is committed to git
+Manifests and results are small and are the evidence behind the CV numbers. Traces in `logs/` stay ignored. **Risk:** final answers can hold public web text; no secrets are written (the manifest config has the same keys as `run_end.config`, which a test fixes).
+
+### D38. `benchmark/text.py` holds the number and text helpers
+`extract_numbers`, `normalize_words`, `contains_phrase` and `normalize_lines` live there, and `checkers.py` re-exports `extract_numbers`. **Why:** `tasks.py` needs `extract_numbers` (D39) and `checkers.py` needs the check models from `tasks.py`; with both helpers in `checkers.py` the two modules would import each other.
+
+### D39. A `number` check's value may not appear in the task text
+`load_tasks` refuses such a task. **Why:** the number check passes when ANY number in the answer matches; if the expected number were in the task, an answer that only repeats the task would pass without doing any work. **Known weak spots (accepted, listed for session 7):** a long answer listing many numbers could match by chance; the model knows most search facts without searching (`tools_used` is stored, success does not require a tool); the final answer is the last approved step's result, so a plan whose last step only says "file written" fails an answer check.

@@ -13,7 +13,7 @@
 - [x] Step 6: Pass setup: pass id, fingerprint, manifest, refusal (runner, part 2)
 - [x] Step 7: The task loop: results, pause, crashes (runner, part 3)
 - [x] Step 8: Summary and CLI (runner, part 4)
-- [ ] Step 9: Docs sync
+- [x] Step 9: Docs sync
 - [ ] Step 10: Real smoke pass `smoke-1`
 
 ## Overview
