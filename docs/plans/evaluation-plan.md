@@ -2,11 +2,11 @@
 
 **Spec:** docs/specs/evaluation.md
 **Branch:** feature/evaluation
-**Status:** Waiting for approval
+**Status:** Approved
 
 ## Progress
 Part A: build the tools, run the baseline, choose the fixes
-- [ ] Step 1: `evaluation/passes.py`
+- [x] Step 1: `evaluation/passes.py`
 - [ ] Step 2: comparisons and trace count in `evaluation/report.py`
 - [ ] Step 3: results block, `write_block`, report CLI
 - [ ] Step 4: `evaluation/analyze.py`, part 1 (classes, failed calls, repeats)
