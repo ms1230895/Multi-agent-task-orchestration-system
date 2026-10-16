@@ -95,3 +95,9 @@ go
 ya fix all 6 quickly
 ```
 Said after `/code-review` listed 0 Critical and 6 Warnings. Claude fixed all 6 Warnings and listed the Suggestions as deferred in D40. Model: sonnet, effort medium (review itself: sonnet, high).
+
+### 2026-10-17: Spec for session 7, evaluation
+```
+/create-spec evaluation
+```
+No extra description: built from the roadmap entry for session 7, `docs/specs/architecture.md` (section 5), the benchmark spec, decisions D34 to D40, and first-run problems P2, P4 and P6. The fixes are left for a spec addendum after the baseline analysis. Model: opus, effort high.
