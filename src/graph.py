@@ -4,9 +4,18 @@ Architecture layer: 5 (orchestration). The critic gives a verdict; the plain Pyt
 file decides where the run goes next. Every loop here has a hard limit (Hard rule 5).
 """
 
+from collections.abc import Callable
+from functools import partial
 from typing import Any
 
-from src.config import MAX_PLAN_STEPS, Settings
+from langchain_core.language_models import BaseChatModel
+from langgraph.graph import END, START, StateGraph
+from langgraph.graph.state import CompiledStateGraph
+
+from src.agents.critic import run_critic
+from src.agents.executor import stub_executor
+from src.agents.planner import run_planner
+from src.config import MAX_PLAN_STEPS, Settings, get_llm, get_settings
 from src.state import AgentState, Route
 
 # WHY: a failure message must stay short even when the last output is long.
@@ -140,3 +149,55 @@ def recursion_limit(settings: Settings) -> int:
     """
     attempts = (settings.max_retries + 1) * (settings.max_replans + 1)
     return MAX_PLAN_STEPS * attempts * 4 + 10
+
+
+def build_graph(
+    *,
+    llm: BaseChatModel | None = None,
+    settings: Settings | None = None,
+    executor: Callable[[AgentState], dict[str, Any]] | None = None,
+) -> CompiledStateGraph:
+    """Build and compile the graph. Building makes no LLM call.
+
+    Args:
+        llm: the chat model for planner and critic. Default: `get_llm(settings)`.
+        settings: limits and flags. Default: `get_settings()`.
+        executor: the executor node. Default: `stub_executor` (session 4 replaces it).
+
+    Returns:
+        A compiled graph. Invoke it with
+        `config={"recursion_limit": recursion_limit(settings)}`.
+
+    WHY: planner and critic share one `llm`, so one run always uses one model.
+    """
+    settings = settings or get_settings()
+    llm = llm or get_llm(settings)
+    executor = executor or stub_executor
+
+    graph = StateGraph(AgentState)
+
+    # WHY: `partial` binds the llm and settings now, so each node is a plain `state -> dict`.
+    graph.add_node("planner", partial(run_planner, llm=llm))
+    graph.add_node("executor", executor)
+    graph.add_node("critic", partial(run_critic, llm=llm))
+    graph.add_node("advance", partial(advance, settings=settings))
+    graph.add_node("finalize", finalize)
+
+    graph.add_edge(START, "planner")
+    # WHY: explicit path maps make the possible routes visible, and let LangGraph draw and
+    # check the graph.
+    graph.add_conditional_edges(
+        "planner",
+        route_after_planner,
+        {"executor": "executor", "finalize": "finalize"},
+    )
+    graph.add_edge("executor", "critic")
+    graph.add_edge("critic", "advance")
+    graph.add_conditional_edges(
+        "advance",
+        route_after_advance,
+        {"executor": "executor", "planner": "planner", "finalize": "finalize"},
+    )
+    graph.add_edge("finalize", END)
+
+    return graph.compile()

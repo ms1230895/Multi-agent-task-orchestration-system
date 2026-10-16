@@ -12,7 +12,7 @@
 - [x] Step 5: Critic (`src/agents/critic.py`)
 - [x] Step 6: Stub executor (`src/agents/executor.py`)
 - [x] Step 7: Router logic (`decide`, `advance`, edges, `finalize`, `recursion_limit`)
-- [ ] Step 8: Graph wiring (`build_graph`) and end-to-end check
+- [x] Step 8: Graph wiring (`build_graph`) and end-to-end check
 - [ ] Step 9: Docs sync and final checks
 
 ## Overview
