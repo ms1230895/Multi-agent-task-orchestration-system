@@ -1,0 +1,30 @@
+{
+  // Use the project's own Python, so imports resolve (no yellow squiggles)
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+
+  // Pylance: colour code by meaning, and check types
+  "editor.semanticHighlighting.enabled": true,
+  "python.analysis.typeCheckingMode": "standard",
+
+  // Error Lens: highlight error and warning lines with the message inline
+  "errorLens.enabledDiagnosticLevels": ["error", "warning"],
+
+  // Ruff formats Python files on save
+  "[python]": {
+    "editor.defaultFormatter": null,
+    "editor.formatOnSave": true
+  },
+
+  // Keep at most 10 tabs open; the oldest closes automatically
+  "workbench.editor.limit.enabled": true,
+  "workbench.editor.limit.value": 10,
+
+  // Colours for our comment tags
+  "better-comments.tags": [
+    { "tag": "WHY:",     "color": "#98C379", "bold": true,  "italic": false, "strikethrough": false, "underline": false, "backgroundColor": "transparent" },
+    { "tag": "NOTE:",    "color": "#61AFEF", "bold": false, "italic": false, "strikethrough": false, "underline": false, "backgroundColor": "transparent" },
+    { "tag": "STEP",     "color": "#C678DD", "bold": true,  "italic": false, "strikethrough": false, "underline": false, "backgroundColor": "transparent" },
+    { "tag": "TODO:",    "color": "#FF8C00", "bold": false, "italic": false, "strikethrough": false, "underline": false, "backgroundColor": "transparent" },
+    { "tag": "WARNING:", "color": "#FF5555", "bold": true,  "italic": false, "strikethrough": false, "underline": false, "backgroundColor": "transparent" }
+  ]
+}

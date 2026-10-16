@@ -1,0 +1,9 @@
+{
+  "recommendations": [
+    "ms-python.python",            // Python support
+    "ms-python.vscode-pylance",    // colours by meaning + type/import errors
+    "charliermarsh.ruff",          // linting + formatting
+    "usernamehw.errorlens",        // turns error lines red, shows message inline
+    "aaron-bond.better-comments"   // colours our comment tags
+  ]
+}
