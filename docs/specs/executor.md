@@ -65,10 +65,14 @@ def run_executor(
   - `web_search`: "Search the web. Returns up to max_results results, each with title, URL and snippet."
 - `tool_definitions()` builds, for each name in `sorted(TOOLS)`:
   ```python
-  {"type": "function",
-   "function": {"name": name,
-                "description": TOOL_DESCRIPTIONS[name],
-                "parameters": schema.model_json_schema()}}
+  {
+      "type": "function",
+      "function": {
+          "name": name,
+          "description": TOOL_DESCRIPTIONS[name],
+          "parameters": schema.model_json_schema(),
+      },
+  }
   ```
 - **Why not pass the Pydantic classes to `bind_tools`:** LangChain would name the tools after the classes (`CalculatorArgs`), and the gate would reject every call as an unknown tool.
 - **Why the same definitions in both ablation passes:** `ENABLE_VALIDATION` switches off only the gate (D1). The LLM sees the same tools and schemas in both passes, so the only measured difference is the gate.

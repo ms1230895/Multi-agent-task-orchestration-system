@@ -2,7 +2,7 @@
 
 **Spec:** docs/specs/executor.md
 **Branch:** feature/executor
-**Status:** Approved
+**Status:** Implemented
 
 ## Progress
 - [x] Step 1: Tool definitions (`src/tools/definitions.py`)
@@ -11,7 +11,7 @@
 - [x] Step 4: Test fakes (role markers, `bind_tools`, stub moved)
 - [x] Step 5: Executor loop (`src/agents/executor.py`)
 - [x] Step 6: Graph wiring and stub removal
-- [ ] Step 7: Docs sync and final checks
+- [x] Step 7: Docs sync and final checks
 
 ## Overview
 Build bottom-up: first the two small helpers the executor needs (tool definitions, data markers), then use the data markers to close the two session 3 security gaps in the critic and planner, then prepare the test fake so the suite keeps passing when the stub goes away, then the executor loop itself, and last the graph switch. Each step ends with a `python -c` check (fake LLM, spy `call_tool`, no network) and `ruff check`. The full test suite comes afterwards with `/test`.
