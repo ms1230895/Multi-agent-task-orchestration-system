@@ -1,7 +1,7 @@
 # Progress
 
 ## Status
-- **Phase:** Build (roadmap session 3 of 8 next)
+- **Phase:** Build (roadmap session 3 of 9 next)
 - **Last completed:** Session 2, foundation-tools-validation: done (227 tests pass, code review fixes applied; `docs/plans/foundation-tools-validation-plan.md`, decisions in `docs/plans/decisions.md`)
 - **Next:** Session 3, graph-planner-critic (spec: opus, high; implementation: sonnet, medium)
 

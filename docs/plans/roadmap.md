@@ -1,6 +1,6 @@
 # Roadmap
 
-Eight sessions, built in this order. Each session is one feature branch (`feature/<session-name>`) and follows the workflow in CLAUDE.md (spec → plan → implement → test → review → merge). Do not start a session before the ones it depends on are merged into `main`.
+Nine sessions, built in this order. Each session is one feature branch (`feature/<session-name>`) and follows the workflow in CLAUDE.md (spec → plan → implement → test → review → merge). Do not start a session before the ones it depends on are merged into `main`.
 
 Architecture reference: `docs/specs/architecture.md`.
 
@@ -58,6 +58,7 @@ Architecture reference: `docs/specs/architecture.md`.
   - At least 5 real runs with `gpt-oss:120b-cloud` (one per tool, plus one multi-tool) finish without hanging, and their traces are readable.
   - Problems found in these runs are written down (fixed now if small, or listed for session 7).
   - Run command added to CLAUDE.md and `docs/project-memory.md`.
+- **Note:** design `run_task` so it streams trace events as they happen (a generator or callback), so a UI can show live progress using the same events the logger writes. No agent logic in the UI.
 
 ## 6. benchmark
 - **Goal:** Create the 30-task benchmark, its code checkers, and a runner that can pause and resume.
@@ -80,11 +81,18 @@ Architecture reference: `docs/specs/architecture.md`.
   - The top 3 failure causes are found from the traces. Fixes go in as separate small changes, and a fresh pass is run after the fixes (results from before and after are never mixed).
   - A results table and short analysis are saved in `docs/results.md`.
 
-## 8. readme-and-writeup
-- **Goal:** Explain the project for a reader: how it works, how to run it, and what the results honestly are.
-- **Depends on:** 7.
+## 8. streamlit-ui
+- **Goal:** A Streamlit app with three pages: (1) Run a task live, with model selector, validation/retry toggles, and a colour-coded event timeline using the same role colours as the terminal; (2) Trace explorer to replay any run from `logs/`; (3) Benchmark dashboard with Plotly charts for success rate, ablation (off vs on), and model comparison.
+- **Depends on:** 5 (tracing-and-first-runs: the event stream), 6 and 7 (benchmark and evaluation: results to chart).
 - **Done when:**
-  - `README.md` has: what it is, the architecture diagram, setup, how to run a task and the benchmark, the results table, and limitations.
-  - CV bullet points use only measured numbers from `docs/results.md`.
-  - `docs/project-memory.md` and `docs/plans/progress.md` are up to date.
-  - Merged into `main`.
+  - A task runs live in the browser with events appearing as they happen.
+  - Any past trace can be replayed.
+  - The dashboard shows real evaluation numbers.
+  - A replay-only mode exists that makes no LLM calls (safe for public hosting).
+- **Note:** the UI only displays events and results. All agent logic stays in `src/`. Add `streamlit` and `plotly` to `requirements.txt` in this session, not before.
+
+## 9. readme-and-writeup
+- **Goal:** README with architecture diagram, setup steps, UI screenshots, real benchmark numbers, and honest limitations; plus CV bullet points based on measured results.
+- **Depends on:** all previous sessions (1 to 8).
+- **Done when:**
+  - A new person can clone, install, and run a task by following the README alone.
