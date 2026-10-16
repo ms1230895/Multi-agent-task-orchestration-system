@@ -3,7 +3,7 @@
 ## Status
 - **Phase:** Build (roadmap session 7 of 9 next)
 - **Last completed:** Session 6, benchmark: done, waiting for `/git-feature` (837 tests pass; see below). Before that, Session 5, tracing-and-first-runs: done (510 tests pass; code review found 0 Critical, 8 Warnings fixed, Suggestions deferred in D31; `docs/plans/tracing-and-first-runs-plan.md`, `docs/plans/first-runs.md`, decisions D23-D31)
-- **Next:** `/git-feature` for benchmark, then Session 7, evaluation (spec: opus, high; implementation: sonnet, medium)
+- **Next:** Session 7, evaluation: done and ready for `/git-feature` (870 tests pass; baseline passes, analysis, fixes D44/D45, review fixes D46). The post-fix passes (plan Steps 11 and 12) were skipped by Gaurav's decision, so the fixes are not measured. Then Session 8, streamlit-ui (spec: opus, high).
 - **Follow-up fix `feature/fix-line-separator-test`:** done. A VS Code buffer stripped the literal U+2028 from a test; the test now writes it as the escape `\u2028`. Tip: close or revert stale editor tabs before a session.
 - **Follow-up `feature/test-cap`:** done. Hard rule 11: the 837 existing tests are a frozen baseline, tests added after them are capped at 100 (budget = `pytest --collect-only -q` total minus 837). Test-writer, `/test`, test-runner and quality-reviewer updated. No tests deleted. Session 7, evaluation: spec is a Draft on `feature/evaluation` (`docs/specs/evaluation.md`), waiting for review, then `/create-plan evaluation`.
 - **Session 5, tracing-and-first-runs:** Merged into main

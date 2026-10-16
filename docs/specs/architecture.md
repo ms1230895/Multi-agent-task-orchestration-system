@@ -14,10 +14,11 @@ Plain Python code (the **router**) reads the critic's verdict and decides what h
 
 ## 2. Layers
 
-The system has 7 layers, plus 2 cross-cutting pieces used by every layer. Each layer only depends on the layers below it.
+The system has 8 layers, plus 2 cross-cutting pieces used by every layer. Each layer only depends on the layers below it.
 
 | # | Layer | Lives in | Job |
 |---|---|---|---|
+| 8 | Evaluation | `evaluation/` | Read-only: compares passes, counts traced runs, groups failures from traces (section 5) |
 | 7 | Benchmark | `benchmark/` | Runs 30 fixed tasks, checks answers with code, reports metrics |
 | 6 | Entry point | `src/run.py` | `run_task(task)`: builds the graph, runs it, returns the final state |
 | 5 | Orchestration | `src/graph.py`, `src/state.py` | LangGraph graph, `AgentState`, router with hard limits |
@@ -231,6 +232,18 @@ A **pass** is one model + one config running all 30 tasks. The Ollama free plan 
   - Exit codes: 0 complete, 2 refused or invalid, 3 paused, 130 Ctrl-C.
 - **Infrastructure errors are not task failures.** If `run_task` ends with a connection error, timeout or Ollama `ResponseError` (usage cap, rate limit, server error), the runner stops the pass cleanly, writes the run to `paused.jsonl` and no result, and prints "paused, resume later". The task runs again on resume. This keeps a usage cap from looking like an agent failure. After 3 pauses for the same task and error type, the task is recorded as a failed result instead (D40), so one deterministic server error cannot block a pass. Saved error text and final answers have local paths and URL query strings removed (D40). The list of error types is a guess from the client code (D35) and is checked against the first real cap.
 - Planned passes: main model off, main model on, second model on (and second model off if quota allows). Repeated passes are allowed (e.g. `main-on-2`) to reach 100+ runs and to see run-to-run variance.
+
+### Evaluation tools (session 7)
+Two read-only tools in `evaluation/` (outside the code fingerprint, so they can change while passes run). They read `benchmark/results/` and `logs/`; they never run a task or call an LLM. Full design: `docs/specs/evaluation.md`.
+
+- **Pass names:** `<main|second>-<off|on>-<n>`; `n` is 1 before the fixes and 2 after. The manifest's `model` is the truth. `off` means `ENABLE_VALIDATION` and `ENABLE_RETRY` both false.
+- **`python -m evaluation.report`:** reads passes, pools complete passes that share model, config, code fingerprint and task ids (counts summed, rates recomputed, never averaged), and compares two groups only when they differ in exactly one thing:
+  - `ablation`: only the two gate flags differ (one group both off, one both on). Shows the failed-tool-call rate off and on, the absolute difference and the relative reduction (off − on) / off. The reduction is `n/a` when the off rate is 0, and a negative value is shown as an increase.
+  - `model`: only the model differs.
+  - `fix`: only the code fingerprint differs. "Before" is the group that started earlier. Results from before and after a fix are never pooled.
+  - Any other pair with the same tasks and model is listed under "not compared", naming what differs.
+- Every success rate is printed with a 95% Wilson interval; one task is 3.3 points. An incomplete pass is shown but never compared. `docs/results.md` holds a generated block between two marker lines; the text around it is hand-written.
+- **`python -m evaluation.analyze`:** sorts each result into an outcome class (success, infra, crash, wrong answer, planner failed, gave up with the right answer, gave up, other), groups failed tool calls by tool and error kind, and counts repeated failing calls (P4), critic rejections with no tool call (P2) and iteration-limit hits. These are code heuristics: people read the digests and name the causes.
 
 ## 6. Open questions
 1. ~~Critic `replan` verdict~~ Decided in session 3: only `approve` / `retry`. A replan happens only after the step's retries are used up. Revisit after the session 7 traces show whether retries are often wasted. See `docs/plans/decisions.md`.
