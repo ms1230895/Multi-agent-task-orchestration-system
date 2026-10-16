@@ -9,7 +9,7 @@
 - [x] Step 2: `UiSettings` in `src/config.py`
 - [x] Step 3: `format_record` and `HTML_COLOURS` in `src/console.py`
 - [x] Step 4: `ui/render.py` (safe HTML timeline)
-- [ ] Step 5: `ui/live.py` (`RunManager`, `live_settings`)
+- [x] Step 5: `ui/live.py` (`RunManager`, `live_settings`)
 - [ ] Step 6: `ui/data.py` (traces and passes from disk)
 - [ ] Step 7: `ui/charts.py` (three Plotly figures)
 - [ ] Step 8: `ui/app.py`, trace explorer and dashboard pages (replay-only works)
