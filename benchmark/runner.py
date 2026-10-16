@@ -1,0 +1,838 @@
+"""Benchmark runner: runs the tasks of a pass through `run_task`, checks them, saves results.
+
+Architecture layer: 7 (Benchmark). A pass is one model and one config running the tasks. It has
+a folder in `benchmark/results/<pass_id>/` and can be paused (usage cap, connection error) and
+resumed later. See `docs/specs/benchmark.md` for the full design.
+
+Terminal use: `python -m benchmark.runner --pass <pass_id>`.
+"""
+
+import argparse
+import hashlib
+import json
+import re
+import shutil
+import subprocess
+from collections.abc import Callable
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any, Literal
+
+from rich.markup import escape
+
+from benchmark.checkers import CheckResult, run_checks
+from benchmark.tasks import TASKS_PATH, BenchmarkTask, TasksFileError, load_tasks
+from src.config import (
+    MAX_PLAN_STEPS,
+    PROJECT_ROOT,
+    WORKSPACE_DIR,
+    ConfigError,
+    Settings,
+    get_settings,
+)
+from src.console import ERROR, RETRY, SUCCESS, console, print_record, sanitize
+from src.logger import trim
+from src.run import run_task
+from src.state import AgentState
+
+RESULTS_DIR = PROJECT_ROOT / "benchmark" / "results"
+
+# NOTE: the one file the project keeps inside `workspace/`, so the empty folder stays in git.
+KEEP_FILE = ".gitkeep"
+
+MANIFEST_NAME = "manifest.json"
+RESULTS_NAME = "results.jsonl"
+PAUSED_NAME = "paused.jsonl"
+MANIFEST_SCHEMA_VERSION = 1
+
+# WHY: the pass id becomes a folder name, so only lower-case letters, digits and hyphens are
+# allowed, and it cannot start with a hyphen. This blocks `..`, `/` and other surprises.
+PASS_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
+
+GIT_TIMEOUT_S = 10
+
+# WHY: the result line keeps the answer short; the full text is in the trace (`run_end`).
+MAX_RESULT_ANSWER_CHARS = 500
+MAX_TOOL_NAME_CHARS = 100
+
+# WHY: a task that always ends in an infrastructure error (for example a server 500 on one
+# prompt) would pause every resume and spend quota forever, and would never get a result. After
+# this many pauses for the same task and error type it is recorded as a failed task instead.
+MAX_TASK_PAUSES = 3
+
+# WHY: result and paused lines are committed to git (D37). Exception text from httpx or Ollama
+# can hold local paths or URLs with tokens in the query string, so both are removed first.
+_URL_WITH_QUERY = re.compile(r"(https?://[^\s?#]+)\?\S+")
+
+PassOutcome = Literal["complete", "paused"]
+# NOTE: same call shape as `src.run.run_task`; tests pass a fake with scripted states.
+RunFn = Callable[..., AgentState]
+
+# WHY: these errors mean "Ollama or the network could not serve the call", never "the agent
+# did badly". The agents cannot cause them, so the task must not be recorded as a failure
+# (architecture 5, D12, D24). The Ollama client turns `httpx.ConnectError` into
+# `ConnectionError` and raises `ResponseError` for every server answer that is an error
+# (usage cap, rate limit, not signed in, server error); httpx timeouts pass through.
+# WARNING: a guess from reading the client code (like D6). The first real usage cap will show
+# the real text in `paused.jsonl`; adjust this list then.
+INFRA_ERROR_TYPES = frozenset(
+    {
+        "ConnectionError",
+        "ConnectionRefusedError",
+        "ConnectionResetError",
+        "ConnectionAbortedError",
+        "TimeoutError",
+        "ConnectError",
+        "ConnectTimeout",
+        "ReadTimeout",
+        "WriteTimeout",
+        "PoolTimeout",
+        "ReadError",
+        "WriteError",
+        "RemoteProtocolError",
+        "NetworkError",
+        "ResponseError",
+    }
+)
+
+
+class PassRefused(Exception):
+    """Raised when a pass must not start or resume.
+
+    The message says why, and names differing fields without printing their values.
+    """
+
+
+def reset_workspace(workspace: Path) -> None:
+    """Empty the workspace folder, keeping only `.gitkeep`. Create the folder if missing.
+
+    Args:
+        workspace: the sandbox folder (normally `workspace/`).
+
+    WARNING: this deletes everything in the folder, including files put there by hand.
+
+    WHY: a file left by one task (for example `total.txt`) must never make another task pass
+    or fail (architecture 2.7). A symlink is removed as a link and its target is never
+    touched, so a link the agent could not create (Hard rule 4) still cannot make us delete
+    something outside the workspace. A failure raises on purpose: carrying on with a dirty
+    workspace would silently mix tasks.
+
+    Raises:
+        ValueError: if `workspace` itself is a symlink. `iterdir()` would follow it and delete
+            the contents of whatever folder it points to.
+    """
+    # WHY: entries inside are handled as links, but the folder itself is not; a sandbox linked
+    # to another folder (for example `~/Documents`) would be emptied.
+    if workspace.is_symlink():
+        raise ValueError("workspace must be a real folder, not a symlink")
+    workspace.mkdir(parents=True, exist_ok=True)
+    for entry in workspace.iterdir():
+        if entry.name == KEEP_FILE:
+            continue
+        # WHY: check `is_symlink` first, because a link to a folder is also `is_dir()`, and
+        # `rmtree` on it would raise instead of removing just the link.
+        if entry.is_symlink() or entry.is_file():
+            entry.unlink()
+        else:
+            shutil.rmtree(entry)
+
+
+def prepare_workspace(task: BenchmarkTask, workspace: Path) -> None:
+    """Reset the workspace and write the task's input files into it.
+
+    Args:
+        task: the task about to run.
+        workspace: the sandbox folder.
+
+    Raises:
+        ValueError: if a setup path would land outside the workspace. `load_tasks` already
+            refuses such paths; this is a second guard before anything is written.
+
+    WHY: file tasks must find their input files ready (first-run problem P4: a missing file
+    made the executor guess paths and fail 42 tool calls).
+    """
+    reset_workspace(workspace)
+    root = workspace.resolve()
+    for relative, content in task.setup_files.items():
+        target = (root / relative).resolve()
+        # WHY: the workspace was just emptied, so no symlink can redirect this; the check
+        # still guards against a bad path that slipped past the task-file validation.
+        if not target.is_relative_to(root):
+            raise ValueError(f"setup file path leaves the workspace: {relative}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+
+
+def _check_pass_id(pass_id: str) -> None:
+    """Refuse a pass id that is not a safe folder name."""
+    if not isinstance(pass_id, str) or not PASS_ID_PATTERN.fullmatch(pass_id):
+        raise PassRefused(
+            "invalid pass id: use 1 to 40 lower-case letters, digits or hyphens, "
+            "starting with a letter or digit"
+        )
+
+
+def _timestamp() -> str:
+    """Return the current UTC time as ISO 8601 with milliseconds and a `Z`."""
+    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def code_fingerprint(root: Path = PROJECT_ROOT) -> str:
+    """Hash the code and the task file that decide a pass's results.
+
+    Args:
+        root: the project folder.
+
+    Returns:
+        `"sha256:<hex>"` over the sorted relative paths and contents of `src/**/*.py`,
+        `benchmark/*.py` and `benchmark/tasks.json`.
+
+    WHY: session 7 fixes code between passes, and results from before and after a fix must
+    never be mixed (roadmap 7). The git commit alone is not enough: a docs-only commit would
+    block a resume, and uncommitted code changes would not be seen.
+    """
+    files: set[Path] = set()
+    src_dir = root / "src"
+    if src_dir.is_dir():
+        files.update(src_dir.rglob("*.py"))
+    bench_dir = root / "benchmark"
+    if bench_dir.is_dir():
+        files.update(bench_dir.glob("*.py"))
+        tasks_file = bench_dir / "tasks.json"
+        if tasks_file.is_file():
+            files.add(tasks_file)
+
+    digest = hashlib.sha256()
+    for path in sorted(files, key=lambda p: p.relative_to(root).as_posix()):
+        # WHY: the NUL separators stop two different file sets from hashing the same.
+        digest.update(path.relative_to(root).as_posix().encode("utf-8") + b"\0")
+        digest.update(path.read_bytes() + b"\0")
+    return f"sha256:{digest.hexdigest()}"
+
+
+def _git_info(root: Path) -> tuple[str, bool]:
+    """Return `(commit, dirty)` for the manifest. `("unknown", False)` if git is unusable.
+
+    `dirty` is true when code under `src/` or `benchmark/` (not `benchmark/results/`) has
+    uncommitted changes. It is information only; the fingerprint is what blocks a resume.
+    """
+    try:
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=GIT_TIMEOUT_S,
+            check=False,
+        )
+        status = subprocess.run(
+            [
+                "git",
+                "status",
+                "--porcelain",
+                "--",
+                "src",
+                "benchmark",
+                ":(exclude)benchmark/results",
+            ],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=GIT_TIMEOUT_S,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return "unknown", False
+    if head.returncode != 0 or status.returncode != 0:
+        return "unknown", False
+    return head.stdout.strip() or "unknown", bool(status.stdout.strip())
+
+
+def _build_manifest(
+    pass_id: str,
+    settings: Settings,
+    task_ids: list[str],
+    fingerprint: str,
+    git_commit: str,
+    git_dirty: bool,
+) -> dict[str, Any]:
+    """Build the manifest written once when a pass starts (spec section 4).
+
+    WHY: `config` has the same shape as `run_end.config` (settings plus `max_plan_steps`),
+    which a session 5 test fixes so no secret can enter it (Hard rule 7).
+    """
+    return {
+        "schema_version": MANIFEST_SCHEMA_VERSION,
+        "pass_id": pass_id,
+        "model": settings.ollama_model,
+        "config": {**settings.model_dump(), "max_plan_steps": MAX_PLAN_STEPS},
+        "code_fingerprint": fingerprint,
+        "task_ids": task_ids,
+        "git_commit": git_commit,
+        "git_dirty": git_dirty,
+        "started_at": _timestamp(),
+    }
+
+
+def _write_manifest(path: Path, manifest: dict[str, Any]) -> None:
+    """Write the manifest, creating the pass folder. Fails if the manifest already exists.
+
+    WHY: a manifest is written once. Mode `x` means a second runner can never overwrite the
+    record of what the pass was started with.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("x", encoding="utf-8") as handle:
+        handle.write(json.dumps(manifest, indent=2) + "\n")
+
+
+def _read_manifest(path: Path) -> dict[str, Any]:
+    """Read a pass's manifest, or refuse if it is missing or broken."""
+    # WHY: `RecursionError` is what `json.loads` raises for deeply nested input, and it is not a
+    # `ValueError`. A manifest can come from git, so it is read as untrusted data.
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError):
+        raise PassRefused(f"{MANIFEST_NAME} is missing or not valid JSON") from None
+    if not isinstance(manifest, dict):
+        raise PassRefused(f"{MANIFEST_NAME} is missing required fields")
+    # WHY: wrong types would otherwise crash later with a traceback (for example a task id
+    # that is not a string breaks the unknown-id check) instead of a clean refusal.
+    expected_types: dict[str, type] = {
+        "model": str,
+        "code_fingerprint": str,
+        "config": dict,
+        "task_ids": list,
+    }
+    for key, kind in expected_types.items():
+        if not isinstance(manifest.get(key), kind):
+            raise PassRefused(f"{MANIFEST_NAME}: '{key}' is missing or has the wrong type")
+    if not all(isinstance(task_id, str) for task_id in manifest["task_ids"]):
+        raise PassRefused(f"{MANIFEST_NAME}: 'task_ids' must be a list of strings")
+    return manifest
+
+
+def _compare_manifest(manifest: dict[str, Any], current: dict[str, Any]) -> list[str]:
+    """Return the names of the fields that differ between a manifest and the current run.
+
+    Args:
+        manifest: the manifest on disk.
+        current: a dict with `model`, `config`, `code_fingerprint` and `task_ids`.
+
+    Returns:
+        Field names such as `model`, `config.max_replans`, `code_fingerprint`. Values are
+        never included (Hard rule 7: nothing secret may reach a message).
+
+    WHY: this is how one pass never mixes models, settings, tasks or code (architecture 5).
+    """
+    differing: list[str] = []
+    if manifest["model"] != current["model"]:
+        differing.append("model")
+    old_config, new_config = manifest["config"], current["config"]
+    if not isinstance(old_config, dict):
+        differing.append("config")
+    else:
+        for key in sorted(set(old_config) | set(new_config)):
+            if old_config.get(key, object()) != new_config.get(key, object()):
+                differing.append(f"config.{key}")
+    if manifest["code_fingerprint"] != current["code_fingerprint"]:
+        differing.append("code_fingerprint")
+    if manifest["task_ids"] != current["task_ids"]:
+        differing.append("task_ids")
+    return differing
+
+
+def _read_results(path: Path) -> list[dict[str, Any]]:
+    """Read `results.jsonl`: one dict per line. A missing file means no results yet.
+
+    Raises:
+        PassRefused: if a line is not a JSON object (for example a half-written last line).
+
+    WHY: silently dropping a broken line would re-run a paid task, and keeping it would hide
+    a gap. Gaurav deletes the line by hand and resumes.
+    """
+    if not path.exists():
+        return []
+    results: list[dict[str, Any]] = []
+    for number, line in enumerate(path.read_text(encoding="utf-8").split("\n"), start=1):
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except (ValueError, RecursionError):
+            record = None
+        if not isinstance(record, dict) or not isinstance(record.get("task_id"), str):
+            raise PassRefused(
+                f"{RESULTS_NAME} line {number} is broken; delete that line by hand and resume"
+            )
+        results.append(record)
+    return results
+
+
+def _select_tasks(tasks: list[BenchmarkTask], task_ids: list[str] | None) -> list[BenchmarkTask]:
+    """Pick the tasks of a pass, in file order. `None` means all of them.
+
+    Raises:
+        PassRefused: if an id is not in the task file.
+    """
+    if task_ids is None:
+        return list(tasks)
+    known = {task.id for task in tasks}
+    for task_id in task_ids:
+        if task_id not in known:
+            raise PassRefused(f"unknown task id: {task_id[:40]}")
+    wanted = set(task_ids)
+    return [task for task in tasks if task.id in wanted]
+
+
+def is_infra_error(error: str) -> bool:
+    """Tell whether a state's `error` text is an infrastructure error (see `INFRA_ERROR_TYPES`).
+
+    Args:
+        error: `"<ExceptionType>: <message>"`, or `""` for a run that did not crash.
+
+    Returns:
+        True when the exception type before the first `:` is an infrastructure type. Anything
+        else (`""`, `GraphRecursionError`, `ValueError`, a bug) is not.
+    """
+    return error.split(":", 1)[0].strip() in INFRA_ERROR_TYPES
+
+
+class _RunCollector:
+    """An `on_record` callback that keeps what the runner needs from one run's events.
+
+    WHY: `run_task` returns the final state, but the model, the counters and the duration
+    only exist in the `run_end` record, and the tool names only in `tool_call` records.
+    """
+
+    def __init__(self, verbose: bool) -> None:
+        self.run_end: dict[str, Any] | None = None
+        self.tools: list[str] = []
+        self._verbose = verbose
+
+    def __call__(self, record: dict[str, Any]) -> None:
+        """Take one trace record. With `--verbose` also show it live."""
+        event = record.get("event")
+        data = record.get("data")
+        if event == "run_end":
+            self.run_end = record
+        elif event == "tool_call" and isinstance(data, dict):
+            name = data.get("tool")
+            if isinstance(name, str):
+                name = trim(name, MAX_TOOL_NAME_CHARS)
+                if name not in self.tools:
+                    self.tools.append(name)
+        if self._verbose:
+            print_record(record)
+
+
+def _redact(text: str) -> str:
+    """Remove local paths and URL query strings from text that is about to be saved.
+
+    Args:
+        text: an error message or answer from a run.
+
+    Returns:
+        The text with the project folder as `<project>`, the home folder as `~`, and
+        `https://host/path?token=...` as `https://host/path?<redacted>`.
+
+    WHY: results are committed to git (D37) and exception text is not under our control.
+    """
+    # WHY: the project folder first, because it usually lies inside the home folder.
+    for private, label in ((str(PROJECT_ROOT), "<project>"), (str(Path.home()), "~")):
+        if len(private) > 1:
+            text = text.replace(private, label)
+    return _URL_WITH_QUERY.sub(r"\1?<redacted>", text)
+
+
+def _count_pauses(path: Path, task_id: str, error_type: str) -> int:
+    """Count the lines in `paused.jsonl` for one task and error type. Broken lines are skipped."""
+    if not path.exists():
+        return 0
+    count = 0
+    for line in path.read_text(encoding="utf-8").split("\n"):
+        try:
+            record = json.loads(line)
+        except (ValueError, RecursionError):
+            continue
+        if not isinstance(record, dict) or record.get("task_id") != task_id:
+            continue
+        if str(record.get("error", "")).split(":", 1)[0].strip() == error_type:
+            count += 1
+    return count
+
+
+def _append_line(path: Path, record: dict[str, Any]) -> None:
+    """Append one JSON line and close the file.
+
+    WHY: one open-write-close per line means a crash or Ctrl-C keeps every finished task,
+    and resume continues from there. `ensure_ascii` keeps U+2028 in web text from splitting
+    a line (same rule as the traces, D31).
+    """
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, ensure_ascii=True, default=str) + "\n")
+
+
+def _result_line(
+    task: BenchmarkTask,
+    state: AgentState,
+    run_end: dict[str, Any],
+    tools_used: list[str],
+    checks: list[CheckResult],
+) -> dict[str, Any]:
+    """Build the `results.jsonl` line of one finished task (spec section 4).
+
+    WHY: success needs the run to be `done` AND every check to pass. A run the agent gave up
+    on carries "Task failed: ..." plus a partial result; counting it would make the agent
+    look better than it is. `checks_passed` is stored too, so that case stays visible.
+    """
+    checks_passed = all(check.passed for check in checks)
+    data = run_end.get("data", {})
+    return {
+        "task_id": task.id,
+        "category": task.category,
+        "run_id": state["run_id"],
+        "model": run_end["model"],
+        "success": state["status"] == "done" and checks_passed,
+        "status": state["status"],
+        "checks_passed": checks_passed,
+        "checks": [check.model_dump() for check in checks],
+        "error": _redact(state["error"]),
+        "final_answer": trim(_redact(state["final_answer"]), MAX_RESULT_ANSWER_CHARS),
+        "tools_used": tools_used,
+        "counters": dict(data.get("counters", {})),
+        "duration_ms": data.get("duration_ms", 0),
+        "finished_at": _timestamp(),
+    }
+
+
+def _say(text: str, colour: str | None = None) -> None:
+    """Print one line, safe against markup and control characters in LLM or web text."""
+    console.print(escape(sanitize(text)), style=colour, highlight=False, emoji=False)
+
+
+def _progress_text(position: int, total: int, line: dict[str, Any]) -> str:
+    """Write the one-line progress message, with the reason when a task fails."""
+    seconds = line["duration_ms"] / 1000
+    head = f"[{position}/{total}] {line['task_id']} {'PASS' if line['success'] else 'FAIL'}"
+    if line["success"]:
+        return f"{head} {seconds:.1f} s"
+    reasons: list[str] = []
+    if line["status"] != "done":
+        reasons.append(f"run {line['status']}" + (f" ({line['error']})" if line["error"] else ""))
+    failed = [check for check in line["checks"] if not check["passed"]]
+    if failed:
+        reasons.append(f"{failed[0]['type']}: {failed[0]['detail']}")
+    return f"{head} {seconds:.1f} s - " + "; ".join(reasons)
+
+
+def run_pass(
+    pass_id: str,
+    *,
+    task_ids: list[str] | None = None,
+    settings: Settings | None = None,
+    run_fn: RunFn = run_task,
+    tasks_path: Path = TASKS_PATH,
+    results_root: Path = RESULTS_DIR,
+    workspace: Path = WORKSPACE_DIR,
+    root: Path = PROJECT_ROOT,
+    verbose: bool = False,
+) -> PassOutcome:
+    """Run (or resume) a pass: every task through `run_fn`, checked, saved one line at a time.
+
+    Args:
+        pass_id: the pass name, also its folder name under `results_root`.
+        task_ids: run only these tasks (new pass), or assert the pass has exactly these
+            (resume). Default: all tasks (new pass), the manifest's tasks (resume).
+        settings: limits, flags and model. Default: `get_settings()`.
+        run_fn: the function that runs a task. Default: `run_task`; tests pass a fake.
+        tasks_path: the task file.
+        results_root: the folder that holds the pass folders.
+        workspace: the sandbox folder that is emptied before every task.
+        root: the project folder, for the code fingerprint and git info.
+        verbose: show every trace event live.
+
+    Returns:
+        `"complete"` when every task has a result, `"paused"` after an infrastructure error.
+
+    Raises:
+        PassRefused: bad pass id or task id, a pass whose model, settings, tasks or code differ
+            from its manifest, a broken `results.jsonl`, or a run on another model.
+        TasksFileError: the task file is invalid.
+        ConfigError: the settings are missing or invalid.
+    """
+    # STEP 1: check everything that can be refused BEFORE a folder is created, so a refusal
+    # leaves no trace on disk.
+    _check_pass_id(pass_id)
+    # WHY: the workspace is emptied before every task; refuse a linked sandbox up front.
+    if workspace.is_symlink():
+        raise PassRefused("the workspace folder is a symlink; refusing to empty it")
+    if settings is None:
+        settings = get_settings()
+    tasks = load_tasks(tasks_path)
+    requested = _select_tasks(tasks, task_ids)
+    fingerprint = code_fingerprint(root)
+    config = {**settings.model_dump(), "max_plan_steps": MAX_PLAN_STEPS}
+
+    pass_dir = results_root / pass_id
+    manifest_path = pass_dir / MANIFEST_NAME
+    results_path = pass_dir / RESULTS_NAME
+    is_new = not manifest_path.exists() and (not pass_dir.exists() or not any(pass_dir.iterdir()))
+
+    # STEP 2: a new pass writes its manifest; a resumed pass must match it exactly.
+    if is_new:
+        planned = requested
+        commit, dirty = _git_info(root)
+        manifest = _build_manifest(
+            pass_id, settings, [task.id for task in planned], fingerprint, commit, dirty
+        )
+        _write_manifest(manifest_path, manifest)
+        results_path.touch()
+        if dirty:
+            _say("warning: code in src/ or benchmark/ has uncommitted changes (git_dirty)", RETRY)
+    else:
+        manifest = _read_manifest(manifest_path)
+        wanted_ids = [task.id for task in requested] if task_ids is not None else None
+        current = {
+            "model": settings.ollama_model,
+            "config": config,
+            "code_fingerprint": fingerprint,
+            "task_ids": wanted_ids if wanted_ids is not None else manifest["task_ids"],
+        }
+        differing = _compare_manifest(manifest, current)
+        if differing:
+            raise PassRefused(
+                f"cannot resume pass '{pass_id}': these differ from its manifest: "
+                + ", ".join(differing)
+                + ". Start a new pass id instead."
+            )
+        planned = _select_tasks(tasks, manifest["task_ids"])
+
+    # STEP 3: skip the tasks that already have a result.
+    results = _read_results(results_path)
+    done_ids = {record["task_id"] for record in results}
+    remaining = [task for task in planned if task.id not in done_ids]
+    finished = len(planned) - len(remaining)
+    _say(
+        f"Pass {pass_id}: model {manifest['model']}, {finished}/{len(planned)} tasks already done."
+    )
+    # WARNING: the workspace is emptied before every task; files put there by hand are lost.
+    _say(f"warning: {workspace} is emptied before every task", RETRY)
+
+    # STEP 4: one task at a time.
+    for task in remaining:
+        prepare_workspace(task, workspace)
+        collector = _RunCollector(verbose)
+        state = run_fn(task.task, settings=settings, on_record=collector)
+
+        # WHY: a usage cap or connection error says nothing about the agent. Write no result,
+        # so the task runs again on resume (architecture 5).
+        if is_infra_error(state["error"]):
+            paused_path = pass_dir / PAUSED_NAME
+            error_type = state["error"].split(":", 1)[0].strip()
+            pauses = _count_pauses(paused_path, task.id, error_type) + 1
+            _append_line(
+                paused_path,
+                {
+                    "task_id": task.id,
+                    "run_id": state["run_id"],
+                    "error": _redact(state["error"]),
+                    "at": _timestamp(),
+                },
+            )
+            if pauses < MAX_TASK_PAUSES:
+                _say(
+                    f"paused at {task.id} (pause {pauses} of {MAX_TASK_PAUSES} for this task): "
+                    f"{state['error']}. "
+                    f"Resume later with: python -m benchmark.runner --pass {pass_id}",
+                    RETRY,
+                )
+                return "paused"
+            # WHY: the same task paused the pass too often. Carry on below and record it as a
+            # failed task, with its error kept, so a deterministic server error cannot block
+            # the pass forever and the summary still shows it (`crashed`).
+            _say(
+                f"{task.id} paused {pauses} times with {error_type}: recording it as a failed task",
+                RETRY,
+            )
+
+        # WHY: `run_task` always writes a `run_end`; without one the model and counters are
+        # unknown, and a result without them would be unreliable evidence.
+        run_end = collector.run_end
+        if run_end is None:
+            raise PassRefused(f"the run for {task.id} produced no run_end event; pass stopped")
+        # WHY: this should never happen. If it does, the pass would mix models.
+        if run_end.get("model") != manifest["model"]:
+            raise PassRefused(
+                f"the run for {task.id} used a different model than the manifest; pass stopped"
+            )
+
+        checks = run_checks(task, state["final_answer"], workspace)
+        line = _result_line(task, state, run_end, collector.tools, checks)
+        _append_line(results_path, line)
+        finished += 1
+        _say(_progress_text(finished, len(planned), line), SUCCESS if line["success"] else ERROR)
+
+    _print_summary(pass_id, _load_summary(pass_dir, planned_count=len(planned)))
+    return "complete"
+
+
+CATEGORY_ORDER = ("calc", "search", "file", "multi-tool")
+
+
+def _count_int(counters: Any, key: str) -> int:
+    """Read one counter as an int; anything else counts as 0."""
+    value = counters.get(key, 0) if isinstance(counters, dict) else 0
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+def summarize(
+    results: list[dict[str, Any]], *, planned: int | None = None, infra_pauses: int = 0
+) -> dict[str, Any]:
+    """Summarise the result lines of one pass, with the metric definitions of architecture 5.
+
+    Args:
+        results: the lines of `results.jsonl`.
+        planned: how many tasks the pass has in its manifest.
+        infra_pauses: lines in `paused.jsonl`.
+
+    Returns:
+        `success_rate` = successes / results; `failed_tool_call_rate` = failed tool calls /
+        tool calls, summed from the run counters. A rate is `None` when its denominator is 0.
+        `crashed` counts results with a non-empty `error`.
+
+    WHY: session 7 compares passes with exactly these numbers, so they are defined once.
+    """
+    successes = sum(1 for record in results if record.get("success") is True)
+    by_category: dict[str, dict[str, int]] = {}
+    for record in results:
+        category = str(record.get("category", "unknown"))
+        entry = by_category.setdefault(category, {"successes": 0, "tasks": 0})
+        entry["tasks"] += 1
+        if record.get("success") is True:
+            entry["successes"] += 1
+    tool_calls = sum(_count_int(record.get("counters"), "tool_calls") for record in results)
+    failed_calls = sum(
+        _count_int(record.get("counters"), "failed_tool_calls") for record in results
+    )
+    return {
+        "tasks_done": len(results),
+        "tasks_planned": planned,
+        "successes": successes,
+        "success_rate": successes / len(results) if results else None,
+        "by_category": by_category,
+        "tool_calls": tool_calls,
+        "failed_tool_calls": failed_calls,
+        "failed_tool_call_rate": failed_calls / tool_calls if tool_calls else None,
+        "infra_pauses": infra_pauses,
+        "crashed": sum(1 for record in results if record.get("error")),
+    }
+
+
+def _load_summary(pass_dir: Path, *, planned_count: int | None) -> dict[str, Any]:
+    """Read a pass folder and summarise it. Runs nothing and calls no LLM."""
+    results = _read_results(pass_dir / RESULTS_NAME)
+    paused_path = pass_dir / PAUSED_NAME
+    pauses = 0
+    if paused_path.exists():
+        pauses = sum(
+            1 for line in paused_path.read_text(encoding="utf-8").split("\n") if line.strip()
+        )
+    return summarize(results, planned=planned_count, infra_pauses=pauses)
+
+
+def _percent(rate: float | None) -> str:
+    """Write a rate as a percentage, or `n/a` when it has no denominator."""
+    return "n/a" if rate is None else f"{rate:.1%}"
+
+
+def _print_summary(pass_id: str, summary: dict[str, Any]) -> None:
+    """Print the summary of a pass in the terminal."""
+    planned = summary["tasks_planned"]
+    done = (
+        f"{summary['tasks_done']}/{planned}" if planned is not None else str(summary["tasks_done"])
+    )
+    _say(f"Summary of pass {pass_id}")
+    _say(f"  tasks done: {done}")
+    _say(
+        f"  success: {summary['successes']}/{summary['tasks_done']} "
+        f"({_percent(summary['success_rate'])})"
+    )
+    for category in CATEGORY_ORDER:
+        entry = summary["by_category"].get(category)
+        if entry:
+            _say(f"    {category}: {entry['successes']}/{entry['tasks']}")
+    _say(
+        f"  tool calls: {summary['tool_calls']}, failed: {summary['failed_tool_calls']} "
+        f"({_percent(summary['failed_tool_call_rate'])})"
+    )
+    _say(f"  paused by infrastructure errors: {summary['infra_pauses']}")
+    _say(f"  runs that crashed: {summary['crashed']}")
+
+
+def _summary_command(pass_id: str) -> int:
+    """`--summary`: print the summary of an existing pass without running anything."""
+    _check_pass_id(pass_id)
+    pass_dir = RESULTS_DIR / pass_id
+    if not (pass_dir / MANIFEST_NAME).exists():
+        _say(f"no such pass: {pass_id}", ERROR)
+        return 2
+    manifest = _read_manifest(pass_dir / MANIFEST_NAME)
+    planned = len(manifest["task_ids"]) if isinstance(manifest["task_ids"], list) else None
+    _print_summary(pass_id, _load_summary(pass_dir, planned_count=planned))
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Command line entry: run, resume, or summarise a pass.
+
+    Args:
+        argv: the arguments after the program name. Default: `sys.argv[1:]`.
+
+    Returns:
+        0 pass complete (or summary printed), 2 refused or invalid, 3 paused by an
+        infrastructure error, 130 interrupted with Ctrl-C.
+    """
+    parser = argparse.ArgumentParser(
+        prog="python -m benchmark.runner",
+        description="Run, resume or summarise a benchmark pass.",
+    )
+    parser.add_argument("--pass", dest="pass_id", required=True, help="the pass name (a folder)")
+    parser.add_argument(
+        "--tasks", help="comma-separated task ids for a new pass, e.g. calc-01,file-02"
+    )
+    parser.add_argument("--verbose", action="store_true", help="show every trace event live")
+    parser.add_argument(
+        "--summary", action="store_true", help="print the summary of an existing pass and stop"
+    )
+    args = parser.parse_args(argv)
+
+    task_ids: list[str] | None = None
+    if args.tasks is not None:
+        task_ids = [part.strip() for part in args.tasks.split(",") if part.strip()]
+        if not task_ids:
+            parser.error("--tasks needs at least one task id")
+
+    # WHY: a setup mistake needs a short message, not a traceback. `ConfigError` and
+    # `TasksFileError` come before any LLM call; `PassRefused` means a mixed pass was blocked.
+    try:
+        if args.summary:
+            return _summary_command(args.pass_id)
+        outcome = run_pass(
+            args.pass_id, task_ids=task_ids, verbose=args.verbose, results_root=RESULTS_DIR
+        )
+    except (ConfigError, TasksFileError, PassRefused) as exc:
+        _say(f"refused: {exc}", ERROR)
+        return 2
+    except KeyboardInterrupt:
+        # WHY: finished tasks are already on disk; the interrupted task has no `run_end`, so it
+        # is not counted, and resume runs it again.
+        _say(
+            f"interrupted. Resume later with: python -m benchmark.runner --pass {args.pass_id}",
+            RETRY,
+        )
+        return 130
+    return 0 if outcome == "complete" else 3
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

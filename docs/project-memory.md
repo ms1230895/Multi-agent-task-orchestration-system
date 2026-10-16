@@ -15,6 +15,19 @@ python -m src.run "your task here"
 ```
 Runs one task with the Planner, Executor and Critic. Shows the events live in colour and writes the trace to `logs/<run_id>.jsonl`. Needs `OLLAMA_MODEL` in `.env`. Exit code 0 done, 1 failed, 2 configuration error.
 
+### Run a benchmark pass
+```bash
+python -m benchmark.runner --pass <pass_id>
+python -m benchmark.runner --pass smoke-1 --tasks calc-01,search-01,file-02
+```
+Runs the 30 tasks (or the listed ones) as one pass and saves `manifest.json`, `results.jsonl` and `paused.jsonl` in `benchmark/results/<pass_id>/`. The same command resumes a pass; it refuses if the model, settings, tasks or code changed (start a new pass id then). Exit code 0 complete, 2 refused, 3 paused (usage cap or connection error; resume later), 130 Ctrl-C. Empties `workspace/` before every task.
+
+### Show a pass summary
+```bash
+python -m benchmark.runner --pass <pass_id> --summary
+```
+Prints success rate, failed-tool-call rate and counts for an existing pass. Makes no LLM calls.
+
 ## Claude Code commands
 <!-- slash commands and subagents, with one line each on what they do -->
 
@@ -60,3 +73,25 @@ Use it to build a whole plan after one go-ahead. Claude stops only on a failed c
 fix it and then merge
 ```
 Said after `/code-review` listed findings and asked which to fix. Claude fixed all Warnings and deferred the Suggestions (D31); the merge itself is done by Gaurav with `/git-feature`. Model: sonnet, effort medium.
+
+### 2026-10-16: Spec for session 6, benchmark
+```
+/create-spec benchmark
+```
+No extra description: built from the roadmap entry for session 6, `docs/specs/architecture.md` (sections 2.7 and 5), decisions D12 and D24, and first-run problems P3 to P5. Use this short form when the roadmap already describes the session well. Model: opus, effort high.
+
+### 2026-10-17: Plan and implement session 6, benchmark
+```
+/create-plan benchmark
+/implement
+go
+```
+`/implement` was run without a feature name and Claude asked once, listing the 9 steps it would build in one go; "go" started them. The real smoke pass (step 10) needs you: set `.env`, then run `python -m benchmark.runner --pass <pass_id> --tasks calc-01,search-01,file-02` twice. Model: sonnet, effort medium.
+
+### 2026-10-17: Test, review, and fix the review warnings (session 6)
+```
+/test benchmark
+/code-review
+ya fix all 6 quickly
+```
+Said after `/code-review` listed 0 Critical and 6 Warnings. Claude fixed all 6 Warnings and listed the Suggestions as deferred in D40. Model: sonnet, effort medium (review itself: sonnet, high).

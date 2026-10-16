@@ -26,7 +26,8 @@ Report whatever numbers we actually get.
 - Lint and format: `ruff check . --fix && ruff format .`
 - List Ollama models: `ollama list`
 - Run one task: `python -m src.run "your task here"` (prints the events live; the trace goes to `logs/<run_id>.jsonl`)
-The benchmark command is added when it exists.
+- Run or resume a benchmark pass: `python -m benchmark.runner --pass <pass_id>` (results go to `benchmark/results/<pass_id>/`; add `--tasks calc-01,file-02` for a small pass, `--verbose` for live events)
+- Show a pass summary without running anything: `python -m benchmark.runner --pass <pass_id> --summary`
 
 ## Architecture in brief
 Graph: START → planner → executor → critic → advance → router. If the planner fails, planner → finalize.
@@ -38,7 +39,7 @@ Full detail: `docs/specs/architecture.md`. Read it before changing the structure
 
 ## Project layout
 - `src/`: config.py, state.py, tools/, validation.py, agents/, graph.py, run.py, logger.py, console.py
-- `benchmark/`: tasks.json, runner.py, checkers.py
+- `benchmark/`: tasks.json, tasks.py, text.py, checkers.py, runner.py, results/
 - `logs/` (run traces), `workspace/` (sandbox for file tools), `tests/` (mirrors `src/`)
 - `docs/specs/` (what we build), `docs/plans/` (plans and progress), `docs/project-memory.md`
 - `.claude/`: rules/, skills/, agents/, hooks/
