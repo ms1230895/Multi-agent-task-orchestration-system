@@ -11,7 +11,7 @@
 - [x] Step 4: Executor, `advance` and graph wiring
 - [x] Step 5: Fake LLM: an error for one role only
 - [x] Step 6: `run_task` (`src/run.py`)
-- [ ] Step 7: Console: `EVENT_COLOURS` and `print_record`
+- [x] Step 7: Console: `EVENT_COLOURS` and `print_record`
 - [ ] Step 8: CLI `python -m src.run`
 - [ ] Step 9: Docs sync
 - [ ] Step 10: First real runs and `docs/plans/first-runs.md`
