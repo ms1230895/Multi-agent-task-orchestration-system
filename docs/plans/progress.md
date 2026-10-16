@@ -4,7 +4,7 @@
 - **Phase:** Build (roadmap session 5 of 9 next)
 - **Last completed:** Session 4, executor: done (367 tests pass; code review found 0 Critical, Warnings and Suggestions not yet fixed; `docs/plans/executor-plan.md`, decisions D16-D22 in `docs/plans/decisions.md`)
 - **Next:** Session 5, tracing-and-first-runs (spec: opus, high; implementation: sonnet, medium)
-- **Session 5, tracing-and-first-runs:** Plan ready, waiting for approval (`docs/specs/tracing-and-first-runs.md`, `docs/plans/tracing-and-first-runs-plan.md`)
+- **Session 5, tracing-and-first-runs:** Plan approved, implementing (`docs/specs/tracing-and-first-runs.md`, `docs/plans/tracing-and-first-runs-plan.md`)
 
 ## Done
 - [x] Project folder and `.claude/` skeleton

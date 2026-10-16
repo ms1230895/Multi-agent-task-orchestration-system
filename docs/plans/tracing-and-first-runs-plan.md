@@ -2,7 +2,7 @@
 
 **Spec:** docs/specs/tracing-and-first-runs.md
 **Branch:** feature/tracing-and-first-runs
-**Status:** Waiting for approval
+**Status:** Approved
 
 ## Progress
 - [ ] Step 1: Logger core (`src/logger.py`, `LOGS_DIR`, helpers moved from the gate)
