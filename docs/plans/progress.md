@@ -1,10 +1,9 @@
 # Progress
 
 ## Status
-- **Phase:** Build (roadmap session 2 of 8)
-- **Last completed:** Session 1, architecture-and-roadmap (`docs/specs/architecture.md`, `docs/plans/roadmap.md`)
-- **Next:** Session 2, foundation-tools-validation (implementation: sonnet, medium effort)
-- **Current feature:** foundation-tools-validation: Implemented, next: /test (`docs/plans/foundation-tools-validation-plan.md`)
+- **Phase:** Build (roadmap session 3 of 8 next)
+- **Last completed:** Session 2, foundation-tools-validation: done (227 tests pass, code review fixes applied; `docs/plans/foundation-tools-validation-plan.md`, decisions in `docs/plans/decisions.md`)
+- **Next:** Session 3, graph-planner-critic (spec: opus, high; implementation: sonnet, medium)
 
 ## Done
 - [x] Project folder and `.claude/` skeleton
