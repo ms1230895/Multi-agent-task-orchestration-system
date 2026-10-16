@@ -8,7 +8,7 @@
 - [x] Step 1: Scaffolding and `MAX_PLAN_STEPS`
 - [x] Step 2: State (`src/state.py`)
 - [x] Step 3: JSON parsing helper (`src/agents/parsing.py`)
-- [ ] Step 4: Planner (`src/agents/planner.py`)
+- [x] Step 4: Planner (`src/agents/planner.py`)
 - [ ] Step 5: Critic (`src/agents/critic.py`)
 - [ ] Step 6: Stub executor (`src/agents/executor.py`)
 - [ ] Step 7: Router logic (`decide`, `advance`, edges, `finalize`, `recursion_limit`)
