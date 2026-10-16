@@ -10,7 +10,7 @@ Part A: build the tools, run the baseline, choose the fixes
 - [x] Step 2: comparisons and trace count in `evaluation/report.py`
 - [x] Step 3: results block, `write_block`, report CLI
 - [x] Step 4: `evaluation/analyze.py`, part 1 (classes, failed calls, repeats)
-- [ ] Step 5: `evaluation/analyze.py`, part 2 (rejections, limits, digests, CLI)
+- [x] Step 5: `evaluation/analyze.py`, part 2 (rejections, limits, digests, CLI)
 - [ ] Step 6: docs for the tools (architecture, CLAUDE.md, project-memory)
 - [ ] Step 7: baseline passes (Gaurav runs them)
 - [ ] Step 8: baseline analysis and the failure causes
