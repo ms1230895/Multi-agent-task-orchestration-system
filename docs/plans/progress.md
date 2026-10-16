@@ -1,9 +1,9 @@
 # Progress
 
 ## Status
-- **Phase:** Build (roadmap session 2 of 8)
-- **Last completed:** Session 1, architecture-and-roadmap (`docs/specs/architecture.md`, `docs/plans/roadmap.md`)
-- **Next:** Session 2, foundation-tools-validation (implementation: sonnet, medium effort)
+- **Phase:** Build (roadmap session 3 of 8 next)
+- **Last completed:** Session 2, foundation-tools-validation: done (227 tests pass, code review fixes applied; `docs/plans/foundation-tools-validation-plan.md`, decisions in `docs/plans/decisions.md`)
+- **Next:** Session 3, graph-planner-critic (spec: opus, high; implementation: sonnet, medium)
 
 ## Done
 - [x] Project folder and `.claude/` skeleton
@@ -24,5 +24,5 @@
 ## Open questions
 - [x] Tool calling confirmed: gpt-oss:120b-cloud (main), gemma4:31b-cloud (second). deepseek not on free plan.
 - Were the Python libraries installed in this project's `.venv`?
-- GitHub MCP scope (`claude mcp list`)
+- GitHub MCP scope (`claude mcp list`)er 
 - Architecture open questions (see `docs/specs/architecture.md` section 6): critic `replan` verdict, scope of `ENABLE_RETRY`, `src/run.py` vs `src/graph.py`. Also update the `AgentState` field list in CLAUDE.md.
