@@ -36,8 +36,8 @@ Architecture layers (`docs/specs/architecture.md` section 2): layer 1 (LLM facto
 ```python
 class ToolResult(TypedDict):
     ok: bool
-    output: str | None   # set when ok is True
-    error: str | None    # set when ok is False
+    output: str | None  # set when ok is True
+    error: str | None  # set when ok is False
 ```
 
 **Tools:**
@@ -93,8 +93,13 @@ def call_tool(
 ### 5.2 `src/console.py`
 Constants from the colour-coding rule, defined once:
 ```python
-PLANNER = "magenta"; EXECUTOR = "cyan"; CRITIC = "yellow"; TOOL = "blue"
-RETRY = "dark_orange"; SUCCESS = "green"; ERROR = "red"
+PLANNER = "magenta"
+EXECUTOR = "cyan"
+CRITIC = "yellow"
+TOOL = "blue"
+RETRY = "dark_orange"
+SUCCESS = "green"
+ERROR = "red"
 console = Console()
 ```
 Display only. No other module hard-codes a colour.

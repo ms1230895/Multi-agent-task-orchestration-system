@@ -2,7 +2,7 @@
 
 **Spec:** docs/specs/foundation-tools-validation.md
 **Branch:** feature/foundation-tools-validation
-**Status:** Approved
+**Status:** Implemented
 
 ## Progress
 - [x] Step 1: Project scaffolding
@@ -14,7 +14,7 @@
 - [x] Step 7: Web search
 - [x] Step 8: Tool registry
 - [x] Step 9: Validation gate (`src/validation.py`)
-- [ ] Step 10: Docs sync and final checks
+- [x] Step 10: Docs sync and final checks
 
 ## Overview
 Build bottom-up, following the layer order: scaffolding, then config and console (no dependencies), then the shared tool result type, then each tool on its own, then the registry that collects them, and finally the gate that uses the registry and config. Each step ends with a quick manual check (`python -c ...` and VS Code diagnostics). The full test suite is written afterwards with `/test`, from the spec's acceptance criteria.

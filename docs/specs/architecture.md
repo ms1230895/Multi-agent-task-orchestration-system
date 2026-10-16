@@ -44,7 +44,7 @@ Four tools. Each one is a plain Python function plus a Pydantic argument schema.
 
 | Tool | Arguments | Behaviour |
 |---|---|---|
-| `web_search` | `query: str`, `max_results: int = 5` (1–10) | Uses `ddgs`. Returns title, URL, and a snippet per result. Snippets trimmed (about 300 chars each, about 2000 chars total) so the LLM context stays small. |
+| `web_search` | `query: str`, `max_results: int = 3` (1–10) | Uses `ddgs`. Returns title, URL, and a snippet per result. Snippets trimmed (about 300 chars each, about 2000 chars total) so the LLM context stays small. |
 | `calculator` | `expression: str` | Parses with `ast` and evaluates only allowed nodes: numbers, `+ - * / // % **`, unary minus, parentheses, and a small whitelist of `math` functions. Never `eval`/`exec` (Hard rule 3). Limits on exponent size and expression length. |
 | `read_file` | `path: str` | Reads a text file inside `workspace/`. Size cap. |
 | `write_file` | `path: str`, `content: str` | Writes a text file inside `workspace/`, creating parent folders. Size cap. |
@@ -64,8 +64,8 @@ Every tool call from the executor goes through one function, `call_tool(name, ar
 1. **Tool exists?** If the name is not in the registry, return `ok=False`, `error="unknown tool: <name>. Available: ..."`.
 2. **Arguments valid?** (only when `ENABLE_VALIDATION=true`) Validate `args` against the tool's Pydantic schema. On failure, return `ok=False` with a short readable list of what is wrong (field, problem). Log a `validation_error` event.
 3. **Run** the function inside `try/except Exception`. Any exception becomes `ok=False, error="<type>: <message>"`.
-4. **Retry** (only when `ENABLE_RETRY=true`): if the failure is *transient* (network error, timeout, rate limit from `ddgs`), wait (backoff 1 s, then 2 s) and run again, up to `TOOL_RETRY_ATTEMPTS` extra attempts. Log a `retry` event per attempt. Validation errors are never retried by the gate: the same bad arguments would fail again. Instead, the error goes back to the LLM so it can fix them (see Executor).
-5. Log a `tool_call` event with name, args, ok, a trimmed output or error, attempts, and duration.
+4. **Retry** (only when `ENABLE_RETRY=true`): if the failure is *transient* (network error, timeout, rate limit from `ddgs`), wait (backoff 1 s, then 2 s, then 4 s at most) and run again, up to `TOOL_RETRY_ATTEMPTS` extra attempts. Log a `retry` event per attempt. A tool marks a failure as transient by starting its error text with `"transient: "` (`TRANSIENT_PREFIX` in `src/tools/base.py`), which keeps the return format exactly `{ok, output, error}`. In `ddgs` 9.x only timeouts have their own exception; a rate limit arrives as a plain `DDGSException`, so `web_search` also looks for rate-limit and timeout words in the message. Validation errors are never retried by the gate: the same bad arguments would fail again. Instead, the error goes back to the LLM so it can fix them (see Executor).
+5. Log a `tool_call` event with name, args, ok, a trimmed output or error, attempts, and duration. `call_tool` does not write the trace itself: it sends events to an optional `on_event(event, data)` callback, and the logger (session 5) is connected there. A callback that raises never changes the tool result.
 
 When `ENABLE_VALIDATION=false`, step 2 is skipped. The raw arguments go straight to the function, and bad arguments fail inside it (caught by step 3). This is the "off" side of the ablation.
 
@@ -168,6 +168,7 @@ On a replan, the new plan starts at `current_step = 0`, `retries = 0`, and `step
 |---|---|---|
 | `OLLAMA_MODEL` | (required) | Model name. No default in code. |
 | `OLLAMA_TEMPERATURE` | `0` | Repeatability |
+| `OLLAMA_TIMEOUT_S` | `120` | Request timeout for one LLM call, so a hung call cannot hang a run |
 | `ENABLE_VALIDATION` | `true` | Pydantic gate on tool arguments (ablation flag) |
 | `ENABLE_RETRY` | `true` | Gate retries on transient tool errors (ablation flag) |
 | `MAX_RETRIES` | `2` | Critic-driven retries per step |
@@ -220,5 +221,5 @@ A **pass** is one model + one config running all 30 tasks. The Ollama free plan 
 
 ## 6. Open questions
 1. Should the critic be able to request a replan directly (a third verdict, `"replan"`), or should replans only happen after retries are used up? This spec uses only `approve` / `retry`, as listed in the brief.
-2. `ENABLE_RETRY` here controls gate-level retries of transient tool errors only. Critic-driven step retries (`MAX_RETRIES`) stay on in both ablation passes. Is that the split we want?
+2. ~~`ENABLE_RETRY` scope~~ Decided in session 2: `ENABLE_RETRY` controls gate-level retries of transient tool errors only (counted by `TOOL_RETRY_ATTEMPTS`). Critic-driven step retries (`MAX_RETRIES`) stay on in both ablation passes. See `docs/plans/decisions.md`.
 3. The entry point is a new file, `src/run.py`, which is not yet in the CLAUDE.md layout. Alternative: put `run_task` in `src/graph.py`.
