@@ -1,6 +1,6 @@
 # Spec: Foundation, tools, and validation gate
 
-**Status:** Draft
+**Status:** Approved
 **Branch:** feature/foundation-tools-validation
 **Date:** 2026-10-16
 

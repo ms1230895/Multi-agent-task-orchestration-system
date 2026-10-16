@@ -4,6 +4,7 @@
 - **Phase:** Build (roadmap session 2 of 8)
 - **Last completed:** Session 1, architecture-and-roadmap (`docs/specs/architecture.md`, `docs/plans/roadmap.md`)
 - **Next:** Session 2, foundation-tools-validation (implementation: sonnet, medium effort)
+- **Current feature:** foundation-tools-validation: spec approved; plan ready, waiting for approval (`docs/plans/foundation-tools-validation-plan.md`)
 
 ## Done
 - [x] Project folder and `.claude/` skeleton
