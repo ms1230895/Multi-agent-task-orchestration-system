@@ -8,7 +8,7 @@
 - [x] Step 1: Package and text helpers (`benchmark/text.py`)
 - [x] Step 2: Task schema and `load_tasks` (`benchmark/tasks.py`)
 - [x] Step 3: Checkers (`benchmark/checkers.py`)
-- [ ] Step 4: The 30 tasks (`benchmark/tasks.json`)
+- [x] Step 4: The 30 tasks (`benchmark/tasks.json`)
 - [ ] Step 5: Workspace reset and setup (`benchmark/runner.py`, part 1)
 - [ ] Step 6: Pass setup: pass id, fingerprint, manifest, refusal (runner, part 2)
 - [ ] Step 7: The task loop: results, pause, crashes (runner, part 3)
