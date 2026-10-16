@@ -35,3 +35,9 @@ No extra description: the spec was built from the roadmap entry for session 3 an
 /create-spec executor
 ```
 No extra description: built from the roadmap entry for session 4, `docs/specs/architecture.md`, and the session 3 code-review findings. Use this short form when the roadmap already describes the session well. Model: opus, effort high.
+
+### 2026-10-16: Spec for session 5, tracing-and-first-runs
+```
+/create-spec tracing-and-first-runs
+```
+No extra description: built from the roadmap entry for session 5, `docs/specs/architecture.md`, and decisions D5, D6, D12, D15 and D18. Use this short form when the roadmap already describes the session well. Model: opus, effort high.
