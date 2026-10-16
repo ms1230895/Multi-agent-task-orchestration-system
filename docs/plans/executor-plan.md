@@ -2,7 +2,7 @@
 
 **Spec:** docs/specs/executor.md
 **Branch:** feature/executor
-**Status:** Waiting for approval
+**Status:** Approved
 
 ## Progress
 - [ ] Step 1: Tool definitions (`src/tools/definitions.py`)
