@@ -289,59 +289,59 @@ Done when it completes with 3 result lines, a manifest with `model == "gpt-oss:1
 ## 6. Acceptance criteria
 
 **Task file** (`tests/benchmark/test_tasks.py`)
-- [ ] AC1: `load_tasks()` on the real `benchmark/tasks.json` returns 30 tasks with unique ids: 8 `calc`, 7 `search`, 7 `file`, 8 `multi-tool`.
-- [ ] AC2: Every real task has 1 to 3 checks, every id matches `^(calc|search|file|multi)-\d{2}$` with the prefix matching its category, and the ids, task texts, setup files and checks equal the table in section 5.3 (the test holds its own copy of the expected values).
-- [ ] AC3: `load_tasks` raises `TasksFileError` (message names the task id) for each of: invalid JSON, an unknown field, an unknown check type, a duplicate id, a prefix that does not match the category, a regex that does not compile, a `contains` check with all lists empty, more than 3 checks.
-- [ ] AC4: `load_tasks` raises `TasksFileError` for a setup or check path that is empty, absolute (`/etc/x`), has a `..` part (`a/../../x`), or has a backslash.
-- [ ] AC5: `load_tasks` raises `TasksFileError` for a `number` check whose value appears in the task text (task `What is 2 + 40?`, value `2`).
-- [ ] AC6: For every one of the 30 real tasks, a hand-written correct answer and files (held in the test) pass all checks, and a hand-written wrong answer fails at least one.
+- [x] AC1: `load_tasks()` on the real `benchmark/tasks.json` returns 30 tasks with unique ids: 8 `calc`, 7 `search`, 7 `file`, 8 `multi-tool`.
+- [x] AC2: Every real task has 1 to 3 checks, every id matches `^(calc|search|file|multi)-\d{2}$` with the prefix matching its category, and the ids, task texts, setup files and checks equal the table in section 5.3 (the test holds its own copy of the expected values).
+- [x] AC3: `load_tasks` raises `TasksFileError` (message names the task id) for each of: invalid JSON, an unknown field, an unknown check type, a duplicate id, a prefix that does not match the category, a regex that does not compile, a `contains` check with all lists empty, more than 3 checks.
+- [x] AC4: `load_tasks` raises `TasksFileError` for a setup or check path that is empty, absolute (`/etc/x`), has a `..` part (`a/../../x`), or has a backslash.
+- [x] AC5: `load_tasks` raises `TasksFileError` for a `number` check whose value appears in the task text (task `What is 2 + 40?`, value `2`).
+- [x] AC6: For every one of the 30 real tasks, a hand-written correct answer and files (held in the test) pass all checks, and a hand-written wrong answer fails at least one.
 
 **Checkers** (`tests/benchmark/test_checkers.py`, files in `tmp_path`)
-- [ ] AC7: `extract_numbers` gives: `"29,031.69 ft"` → `[29031.69]`; `"1,048,576"` → `[1048576]`; `"1.798754748e10"` → `[17987547480]`; `"2026-10-16"` → `[2026, 10, 16]`; `"-5 degrees"` → `[-5]`; `"1,2,3"` → `[1, 2, 3]`; `"8 848 000"` with U+202F → contains `848000`; `"no numbers"` → `[]`.
-- [ ] AC8: `number` passes for `"The answer is 1,415."` with value 1415, passes for `7401.2214` with value 7401.22 and tolerance 0.01, fails for `7401.24` with the same check, and fails for `"no idea"`; the failure detail lists the numbers found.
-- [ ] AC9: `contains` is case-insensitive and accent-insensitive (`"Gabriel García Márquez"` passes all ["Marquez"]), matches whole words only (`"Mozart"` fails all ["art"]), passes `any` when one keyword is present, and fails when a `none` keyword is present.
-- [ ] AC10: `regex` passes when the pattern matches (case-insensitive) and fails otherwise.
-- [ ] AC11: `exact` passes for `"eggs\r\nmilk  \nbread\n\n"` against `"eggs\nmilk\nbread"`, and fails for `"'benchmark ok'"` against `"benchmark ok"` and for `"Benchmark ok"` (case-sensitive).
-- [ ] AC12: A check with `file` reads `workspace/<file>`; a missing file fails with detail starting `file not found`, a file over 100 000 bytes fails with `file too large`, and neither raises.
-- [ ] AC13: A symlink inside the workspace that points outside it fails the check (it is never read).
-- [ ] AC14: `run_checks` returns one `CheckResult` per check, in order, even after a failed one; `source` is `"answer"` or `"file:<path>"`; every `detail` is at most 200 chars.
+- [x] AC7: `extract_numbers` gives: `"29,031.69 ft"` → `[29031.69]`; `"1,048,576"` → `[1048576]`; `"1.798754748e10"` → `[17987547480]`; `"2026-10-16"` → `[2026, 10, 16]`; `"-5 degrees"` → `[-5]`; `"1,2,3"` → `[1, 2, 3]`; `"8 848 000"` with U+202F → contains `848000`; `"no numbers"` → `[]`.
+- [x] AC8: `number` passes for `"The answer is 1,415."` with value 1415, passes for `7401.2214` with value 7401.22 and tolerance 0.01, fails for `7401.24` with the same check, and fails for `"no idea"`; the failure detail lists the numbers found.
+- [x] AC9: `contains` is case-insensitive and accent-insensitive (`"Gabriel García Márquez"` passes all ["Marquez"]), matches whole words only (`"Mozart"` fails all ["art"]), passes `any` when one keyword is present, and fails when a `none` keyword is present.
+- [x] AC10: `regex` passes when the pattern matches (case-insensitive) and fails otherwise.
+- [x] AC11: `exact` passes for `"eggs\r\nmilk  \nbread\n\n"` against `"eggs\nmilk\nbread"`, and fails for `"'benchmark ok'"` against `"benchmark ok"` and for `"Benchmark ok"` (case-sensitive).
+- [x] AC12: A check with `file` reads `workspace/<file>`; a missing file fails with detail starting `file not found`, a file over 100 000 bytes fails with `file too large`, and neither raises.
+- [x] AC13: A symlink inside the workspace that points outside it fails the check (it is never read).
+- [x] AC14: `run_checks` returns one `CheckResult` per check, in order, even after a failed one; `source` is `"answer"` or `"file:<path>"`; every `detail` is at most 200 chars.
 
 **Workspace** (`tests/benchmark/test_runner.py`, `tmp_path` workspace)
-- [ ] AC15: `reset_workspace` removes files and nested folders, keeps `.gitkeep`, and creates a missing workspace folder.
-- [ ] AC16: `reset_workspace` removes a symlink to a file and a symlink to a folder that lie outside the workspace without touching their targets (target file and folder contents still exist).
-- [ ] AC17: `prepare_workspace` leaves exactly the task's setup files (with parent folders) and `.gitkeep`, with the exact contents.
+- [x] AC15: `reset_workspace` removes files and nested folders, keeps `.gitkeep`, and creates a missing workspace folder.
+- [x] AC16: `reset_workspace` removes a symlink to a file and a symlink to a folder that lie outside the workspace without touching their targets (target file and folder contents still exist).
+- [x] AC17: `prepare_workspace` leaves exactly the task's setup files (with parent folders) and `.gitkeep`, with the exact contents.
 
 **Runner** (fake `run_fn` that returns a scripted state and sends a `run_end` record; no LLM, no network)
-- [ ] AC18: A new pass over 3 tasks writes `manifest.json` with exactly the keys of section 4, `model == settings.ollama_model`, `config` equal to the `run_end` config shape (settings plus `max_plan_steps`), and `task_ids` equal to the 3 ids in file order; `results.jsonl` gets 3 lines with exactly the keys of section 4; outcome `complete`.
-- [ ] AC19: `success` is `True` only when `status == "done"` and every check passes; a `failed` state whose answer passes the checks gives `success=False` and `checks_passed=True`.
-- [ ] AC20: `prepare_workspace` runs before each task: the fake `run_fn` sees the task's setup files and no file from the previous task.
-- [ ] AC21: Resuming a pass with 2 of 3 results calls `run_fn` exactly once, for the missing task; resuming a complete pass calls it zero times.
-- [ ] AC22: Resume refuses (raises `PassRefused`, exit 2, no `run_fn` call, files unchanged) when the model differs, when any config value differs (`enable_validation`, `max_replans`), when `code_fingerprint` differs, and when `--tasks` differs from the manifest; the message names the differing field.
-- [ ] AC23: A state with `error = "ResponseError: you have reached your weekly usage limit"` on task 2 of 3: outcome `paused`, exit 3, `results.jsonl` has 1 line, `paused.jsonl` has 1 line with that task id and error, and task 3 is not run. A resume afterwards runs tasks 2 and 3.
-- [ ] AC24: `is_infra_error` is `True` for `"ConnectionError: down"`, `"ConnectError: x"`, `"ReadTimeout: x"`, `"ResponseError: x"`, `"TimeoutError: x"`, and `False` for `""`, `"GraphRecursionError: x"`, `"ValueError: task is empty"`, `"KeyError: 'plan'"`.
-- [ ] AC25: A non-infrastructure crash (`error = "KeyError: 'plan'"`) writes a result line with `success=False` and that `error`, and the pass continues to the next task.
-- [ ] AC26: A `run_end` record whose `model` differs from the manifest stops the pass with exit 2 and writes no result line for that task.
-- [ ] AC27: `tools_used` lists the tool names from the run's `tool_call` records, each once, in first-use order; `counters` equals the `run_end` counters; `final_answer` is cut to 500 chars.
-- [ ] AC28: Pass ids `"../x"`, `"a/b"`, `"Main"`, `""`, and a 41-char id are refused with exit 2 and no folder is created; `"main-on-1"` is accepted.
-- [ ] AC29: An unknown id in `--tasks` refuses with exit 2 and creates no pass folder.
-- [ ] AC30: `code_fingerprint` is the same for the same files, changes when a `.py` file under `src/` or `benchmark/` or `tasks.json` changes, and does not change when a file under `docs/` changes (tested on a copy in `tmp_path`).
+- [x] AC18: A new pass over 3 tasks writes `manifest.json` with exactly the keys of section 4, `model == settings.ollama_model`, `config` equal to the `run_end` config shape (settings plus `max_plan_steps`), and `task_ids` equal to the 3 ids in file order; `results.jsonl` gets 3 lines with exactly the keys of section 4; outcome `complete`.
+- [x] AC19: `success` is `True` only when `status == "done"` and every check passes; a `failed` state whose answer passes the checks gives `success=False` and `checks_passed=True`.
+- [x] AC20: `prepare_workspace` runs before each task: the fake `run_fn` sees the task's setup files and no file from the previous task.
+- [x] AC21: Resuming a pass with 2 of 3 results calls `run_fn` exactly once, for the missing task; resuming a complete pass calls it zero times.
+- [x] AC22: Resume refuses (raises `PassRefused`, exit 2, no `run_fn` call, files unchanged) when the model differs, when any config value differs (`enable_validation`, `max_replans`), when `code_fingerprint` differs, and when `--tasks` differs from the manifest; the message names the differing field.
+- [x] AC23: A state with `error = "ResponseError: you have reached your weekly usage limit"` on task 2 of 3: outcome `paused`, exit 3, `results.jsonl` has 1 line, `paused.jsonl` has 1 line with that task id and error, and task 3 is not run. A resume afterwards runs tasks 2 and 3.
+- [x] AC24: `is_infra_error` is `True` for `"ConnectionError: down"`, `"ConnectError: x"`, `"ReadTimeout: x"`, `"ResponseError: x"`, `"TimeoutError: x"`, and `False` for `""`, `"GraphRecursionError: x"`, `"ValueError: task is empty"`, `"KeyError: 'plan'"`.
+- [x] AC25: A non-infrastructure crash (`error = "KeyError: 'plan'"`) writes a result line with `success=False` and that `error`, and the pass continues to the next task.
+- [x] AC26: A `run_end` record whose `model` differs from the manifest stops the pass with exit 2 and writes no result line for that task.
+- [x] AC27: `tools_used` lists the tool names from the run's `tool_call` records, each once, in first-use order; `counters` equals the `run_end` counters; `final_answer` is cut to 500 chars.
+- [x] AC28: Pass ids `"../x"`, `"a/b"`, `"Main"`, `""`, and a 41-char id are refused with exit 2 and no folder is created; `"main-on-1"` is accepted.
+- [x] AC29: An unknown id in `--tasks` refuses with exit 2 and creates no pass folder.
+- [x] AC30: `code_fingerprint` is the same for the same files, changes when a `.py` file under `src/` or `benchmark/` or `tasks.json` changes, and does not change when a file under `docs/` changes (tested on a copy in `tmp_path`).
 
 **Summary and CLI**
-- [ ] AC31: `summarize` on 4 scripted results (2 successes, 3 calc + 1 file, 10 tool calls of which 3 failed, 1 crash) gives `success_rate == 0.5`, the right `by_category`, `failed_tool_call_rate == 0.3`, `crashed == 1`; with 0 tool calls the rate is `None`.
-- [ ] AC32: `main(["--pass", "p1", "--summary"])` on an existing pass prints the summary, returns 0, and never calls `run_fn`; on a missing pass it returns 2.
-- [ ] AC33: `main` returns 0 for a complete pass, 3 for a paused one, 2 for a `ConfigError` (message printed, no traceback).
+- [x] AC31: `summarize` on 4 scripted results (2 successes, 3 calc + 1 file, 10 tool calls of which 3 failed, 1 crash) gives `success_rate == 0.5`, the right `by_category`, `failed_tool_call_rate == 0.3`, `crashed == 1`; with 0 tool calls the rate is `None`.
+- [x] AC32: `main(["--pass", "p1", "--summary"])` on an existing pass prints the summary, returns 0, and never calls `run_fn`; on a missing pass it returns 2.
+- [x] AC33: `main` returns 0 for a complete pass, 3 for a paused one, 2 for a `ConfigError` (message printed, no traceback).
 
 **Source rules**
-- [ ] AC34: `benchmark/*.py` contains no model name (`gpt-oss`, `gemma`), does not read the environment (`os.environ`, `getenv`, `load_dotenv`), does not use `eval(`/`exec(`, and imports nothing from `langchain_ollama` (test reads the source). **Why:** the checkers must be code only (Hard rule 6), and the model comes only from config (Hard rule 2).
+- [x] AC34: `benchmark/*.py` contains no model name (`gpt-oss`, `gemma`), does not read the environment (`os.environ`, `getenv`, `load_dotenv`), does not use `eval(`/`exec(`, and imports nothing from `langchain_ollama` (test reads the source). **Why:** the checkers must be code only (Hard rule 6), and the model comes only from config (Hard rule 2).
 
 **Project checks**
-- [ ] AC35: `pytest -q` passes with no network and no LLM calls; the session 2 to 5 tests pass unchanged.
-- [ ] AC36: `ruff check .` reports no errors.
+- [x] AC35: `pytest -q` passes with no network and no LLM calls; the session 2 to 5 tests pass unchanged.
+- [x] AC36: `ruff check .` reports no errors.
 
 **Real smoke pass** (not a unit test; checked by code over the files)
-- [ ] AC37: `benchmark/results/smoke-1/` has a manifest with `model == "gpt-oss:120b-cloud"` and 3 result lines; each `run_id` has a trace in `logs/` whose every line has that model and whose last line is the only `run_end`.
-- [ ] AC38: A second run of the same command prints that all tasks are done, adds no result line and creates no new trace.
-- [ ] AC39: CLAUDE.md "Commands" and `docs/project-memory.md` contain `python -m benchmark.runner --pass <pass_id>`.
+- [x] AC37: `benchmark/results/smoke-1/` has a manifest with `model == "gpt-oss:120b-cloud"` and 3 result lines; each `run_id` has a trace in `logs/` whose every line has that model and whose last line is the only `run_end`.
+- [x] AC38: A second run of the same command prints that all tasks are done, adds no result line and creates no new trace.
+- [x] AC39: CLAUDE.md "Commands" and `docs/project-memory.md` contain `python -m benchmark.runner --pass <pass_id>`.
 
 ## 7. Edge cases and errors
 - **Usage cap, rate limit, Ollama down, network down:** `run_task` catches it (session 5); the runner sees an infrastructure error type, writes `paused.jsonl`, writes no result, exits 3. Resume runs the task again (AC23).
