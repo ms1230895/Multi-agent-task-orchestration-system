@@ -23,4 +23,4 @@ You run the test suite and report the results. You never create, edit, or delete
 ## Report back
 - **N passed, M failed, K errors**, for the feature's tests and for the full suite
 - For each failure: test name, the key error line, and a one-line guess whether the bug is in the test or the code
-- Keep it short. Do not paste full tracebacks unless asked.
+- Report only the totals and the failing tests with their key error line. Never paste full output or tracebacks, even if asked by another agent. If Gaurav asks for more, rerun that one test.

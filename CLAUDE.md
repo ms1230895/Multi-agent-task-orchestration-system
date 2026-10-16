@@ -58,6 +58,7 @@ Full detail: `docs/specs/architecture.md`. Read it before changing the structure
 8. Unit tests never call an LLM or the internet. Mock them.
 9. All feature work happens on a `feature/<slug>` branch. Never commit feature code directly to `main`; it reaches main only through `/git-feature`.
 10. Ask before any `git push`. Never force-push. Never use `git branch -D`.
+11. Test budget. The 837 tests that existed on 2026-10-17 are a frozen baseline: never delete or merge them to make room. From then on, tests added after the baseline are capped at 100 (budget used = last line of `pytest --collect-only -q` minus 837; parametrized cases count one by one). Prefer fewer, meaningful tests.
 
 ## Working with Gaurav
 - Gaurav is learning. Before writing code, explain in simple steps what you will build and why, then wait for his go-ahead.

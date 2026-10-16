@@ -114,3 +114,9 @@ Said after `/code-review` listed 0 Critical and 6 Warnings. Claude fixed all 6 W
 /create-spec evaluation
 ```
 No extra description: built from the roadmap entry for session 7, `docs/specs/architecture.md` (section 5), the benchmark spec, decisions D34 to D40, and first-run problems P2, P4 and P6. The fixes are left for a spec addendum after the baseline analysis. Model: opus, effort high.
+
+### 2026-10-17: Cap new tests at 100 (837-test baseline frozen)
+```
+I want to cap the whole test suite at 100 tests, to cut the tokens the test subagents use. [...] don't delete the test that has happened up until now, just add this now and from this point onward we will do tests in this specific way, do not delete any tests
+```
+Result: the 837 existing tests are a frozen baseline; tests added after it are capped at 100 (budget = `pytest --collect-only -q` total minus 837). Hard rule 11 in CLAUDE.md; `test-writer`, `/test`, `test-runner` and `quality-reviewer` updated. Model: sonnet, effort medium.
