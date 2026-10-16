@@ -4,7 +4,8 @@
 - **Phase:** Build (roadmap session 6 of 9 next)
 - **Last completed:** Session 5, tracing-and-first-runs: done (510 tests pass; code review found 0 Critical, 8 Warnings fixed, Suggestions deferred in D31; `docs/plans/tracing-and-first-runs-plan.md`, `docs/plans/first-runs.md`, decisions D23-D31)
 - **Next:** Session 6, benchmark (spec: opus, high; implementation: sonnet, medium)
-- **Session 5, tracing-and-first-runs:** Reviewed and fixed, ready for /git-feature
+- **Session 5, tracing-and-first-runs:** Merged into main
+- **Session 6, benchmark:** Plan ready, waiting for approval (`docs/specs/benchmark.md`, `docs/plans/benchmark-plan.md`)
 
 ## Done
 - [x] Project folder and `.claude/` skeleton

@@ -1,6 +1,6 @@
 # Spec: Benchmark
 
-**Status:** Draft
+**Status:** Approved
 **Branch:** feature/benchmark
 **Date:** 2026-10-16
 
@@ -371,6 +371,8 @@ All unit tests: no LLM, no internet (Hard rule 8). The runner gets a fake `run_f
 AC35 and AC36: run `pytest -q` and `ruff check .`. AC37 to AC39 are checked after the smoke pass with a short check in the terminal and by reading the docs.
 
 ## 9. Open questions
+Settled with the recommendations below when the spec was approved (`/create-plan`, 2026-10-16); recorded as decisions in the plan's docs step. Question 2 needs Gaurav to set `.env` before the smoke pass.
+
 1. **Success needs `status == "done"` and all checks passing** (section 5.2). The alternative is "checks pass" only, which would count a run the agent gave up on. Both are stored, so either can be reported, but the headline number must be chosen now. Use "done and checks pass"?
 2. **`MAX_REPLANS` (first-run problem P3).** Your `.env` has 2; the code default and D4 say 1. Every pass records it in the manifest and resume refuses a change, so the value must be fixed before the first real pass. Recommendation: set `MAX_REPLANS=1` in `.env` before the smoke pass (fewer LLM calls per task under the usage caps). Which value?
 3. **Commit `benchmark/results/` to git?** Recommendation: yes. Manifests and results are small and are the evidence behind the CV numbers; traces in `logs/` stay ignored. The risk is that final answers hold web text, which is public anyway.
