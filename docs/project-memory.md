@@ -120,3 +120,9 @@ No extra description: built from the roadmap entry for session 7, `docs/specs/ar
 I want to cap the whole test suite at 100 tests, to cut the tokens the test subagents use. [...] don't delete the test that has happened up until now, just add this now and from this point onward we will do tests in this specific way, do not delete any tests
 ```
 Result: the 837 existing tests are a frozen baseline; tests added after it are capped at 100 (budget = `pytest --collect-only -q` total minus 837). Hard rule 11 in CLAUDE.md; `test-writer`, `/test`, `test-runner` and `quality-reviewer` updated. Model: sonnet, effort medium.
+
+### 2026-10-17: Spec for session 8, streamlit-ui
+```
+/create-spec streamlit-ui
+```
+No extra description: built from the roadmap entry for session 8, `docs/specs/architecture.md`, `src/run.py` (`on_record`), `src/console.py` (role colours) and the evaluation tools. Key choices proposed: live runs in a background thread, replay-only mode by default (`UI_ALLOW_LIVE_RUNS`), UI settings kept out of `Settings`. Model: opus, effort high.
