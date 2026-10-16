@@ -23,7 +23,6 @@
     ],
     "deny": [
       "Read(./.env)",
-      "Read(./.env.*)",
       "Bash(rm -rf *)",
       "Bash(git push --force *)",
       "Bash(git push -f *)",

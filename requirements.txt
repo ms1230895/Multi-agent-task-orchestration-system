@@ -1,0 +1,12 @@
+# Runtime
+langgraph
+langchain-core
+langchain-ollama
+pydantic>=2
+python-dotenv>=1.0
+ddgs
+rich>=13
+
+# Development
+pytest>=8
+ruff
