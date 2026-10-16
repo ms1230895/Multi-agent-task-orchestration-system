@@ -17,3 +17,10 @@ source .venv/bin/activate
 
 ## Prompt history
 <!-- dated record of prompts that started or finished a feature -->
+
+### 2026-10-16: Spec for session 2, foundation-tools-validation
+```
+/create-spec foundation-tools-validation
+```
+Background description given just before it: "Build the foundation layer from docs/specs/architecture.md: (1) src/config.py loading .env (model names, MAX_RETRIES, MAX_REPLANS, ENABLE_VALIDATION, ENABLE_RETRY) with safe defaults; (2) src/console.py with the rich colour constants from the colour-coding rule; (3) four tools — calculator (ast only), read_file and write_file (workspace/ only), web_search (ddgs, top 3 trimmed results) — each with a Pydantic input schema and returning {ok, output, error}; (4) a tool registry mapping name to (schema, function); (5) a validation gate that checks the tool exists, validates arguments, runs the tool in try/except, and retries transient tool failures such as a search timeout up to MAX_RETRIES when ENABLE_RETRY is true. The retry where the LLM fixes its own bad tool call belongs to the executor in session 4, not here."
+Use it to start a roadmap session's spec. Type the slash command directly; don't paste it, or the skill won't run. Model: opus, effort high (set by the skill).
