@@ -18,6 +18,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 # WHY: tools and tests need one agreed location for the sandbox folder (Hard rule 4).
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 WORKSPACE_DIR = PROJECT_ROOT / "workspace"
+# WHY: the trace logger and tests need one agreed location for the JSONL traces.
+LOGS_DIR = PROJECT_ROOT / "logs"
 
 # WHY: a fixed design limit, used by the `Plan` schema and by `recursion_limit`. It stays the
 # same in every benchmark pass, so it is a constant here and not an `.env` setting.

@@ -16,6 +16,7 @@ from src.agents.critic import run_critic
 from src.agents.executor import run_executor
 from src.agents.planner import run_planner
 from src.config import MAX_PLAN_STEPS, Settings, get_llm, get_settings
+from src.logger import MAX_TRACE_TEXT_CHARS, EventCallback, emit_safely, trim
 from src.state import AgentState, Route
 
 # WHY: a failure message must stay short even when the last output is long.
@@ -52,18 +53,22 @@ def decide(state: AgentState, settings: Settings) -> Route:
     return "failed"
 
 
-def advance(state: AgentState, *, settings: Settings) -> dict[str, Any]:
+def advance(
+    state: AgentState, *, settings: Settings, on_event: EventCallback | None = None
+) -> dict[str, Any]:
     """Apply the router's decision: move the counters and store the route.
 
     Args:
         state: the state after the critic.
         settings: the limits (`max_retries`, `max_replans`).
+        on_event: optional callback `(event, data)`. Only the `retry` route emits an event
+            (`retry` with kind `step`); the other routes are visible in the next events.
 
     Returns:
         Only the changed fields, always including `route`. The input state is not changed.
 
     WHY: a conditional edge function should only choose a node. Doing the counter updates in
-    a node keeps every state change visible to the trace (session 5).
+    a node keeps every state change visible to the trace.
     """
     route = decide(state, settings)
 
@@ -84,6 +89,18 @@ def advance(state: AgentState, *, settings: Settings) -> dict[str, Any]:
             "status": "done",
         }
     if route == "retry":
+        # WHY: the trace must show that a step was sent back, and why. `attempt` is the new
+        # `retries` value, so the first retry is 1.
+        emit_safely(
+            on_event,
+            "retry",
+            {
+                "kind": "step",
+                "step": state["current_step"],
+                "attempt": state["retries"] + 1,
+                "reason": trim(state["feedback"], MAX_TRACE_TEXT_CHARS),
+            },
+        )
         # WHY: feedback is kept, so the executor sees what to fix.
         return {"route": route, "retries": state["retries"] + 1}
     if route == "replan":
@@ -156,6 +173,7 @@ def build_graph(
     llm: BaseChatModel | None = None,
     settings: Settings | None = None,
     executor: Callable[[AgentState], dict[str, Any]] | None = None,
+    on_event: EventCallback | None = None,
 ) -> CompiledStateGraph:
     """Build and compile the graph. Building makes no LLM call.
 
@@ -163,6 +181,8 @@ def build_graph(
         llm: the chat model for planner and critic. Default: `get_llm(settings)`.
         settings: limits and flags. Default: `get_settings()`.
         executor: the executor node. Default: `run_executor` with the shared `llm`.
+        on_event: optional callback `(event, data)` given to the planner, critic, `advance`
+            and the default executor. A passed-in `executor` is used as it is.
 
     Returns:
         A compiled graph. Invoke it with
@@ -174,15 +194,15 @@ def build_graph(
     llm = llm or get_llm(settings)
     # WHY: `is not None`, not `or`, so a callable executor is never replaced by truthiness.
     if executor is None:
-        executor = partial(run_executor, llm=llm, settings=settings)
+        executor = partial(run_executor, llm=llm, settings=settings, on_event=on_event)
 
     graph = StateGraph(AgentState)
 
     # WHY: `partial` binds the llm and settings now, so each node is a plain `state -> dict`.
-    graph.add_node("planner", partial(run_planner, llm=llm))
+    graph.add_node("planner", partial(run_planner, llm=llm, on_event=on_event))
     graph.add_node("executor", executor)
-    graph.add_node("critic", partial(run_critic, llm=llm))
-    graph.add_node("advance", partial(advance, settings=settings))
+    graph.add_node("critic", partial(run_critic, llm=llm, on_event=on_event))
+    graph.add_node("advance", partial(advance, settings=settings, on_event=on_event))
     graph.add_node("finalize", finalize)
 
     graph.add_edge(START, "planner")

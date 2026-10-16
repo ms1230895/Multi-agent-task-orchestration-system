@@ -1,9 +1,10 @@
 # Progress
 
 ## Status
-- **Phase:** Build (roadmap session 5 of 9 next)
-- **Last completed:** Session 4, executor: done (367 tests pass; code review found 0 Critical, Warnings and Suggestions not yet fixed; `docs/plans/executor-plan.md`, decisions D16-D22 in `docs/plans/decisions.md`)
-- **Next:** Session 5, tracing-and-first-runs (spec: opus, high; implementation: sonnet, medium)
+- **Phase:** Build (roadmap session 6 of 9 next)
+- **Last completed:** Session 5, tracing-and-first-runs: done (510 tests pass; code review found 0 Critical, 8 Warnings fixed, Suggestions deferred in D31; `docs/plans/tracing-and-first-runs-plan.md`, `docs/plans/first-runs.md`, decisions D23-D31)
+- **Next:** Session 6, benchmark (spec: opus, high; implementation: sonnet, medium)
+- **Session 5, tracing-and-first-runs:** Reviewed and fixed, ready for /git-feature
 
 ## Done
 - [x] Project folder and `.claude/` skeleton
@@ -25,4 +26,4 @@
 - [x] Tool calling confirmed: gpt-oss:120b-cloud (main), gemma4:31b-cloud (second). deepseek not on free plan.
 - Were the Python libraries installed in this project's `.venv`?
 - GitHub MCP scope (`claude mcp list`)er 
-- Architecture open questions (see `docs/specs/architecture.md` section 6): critic `replan` verdict, scope of `ENABLE_RETRY`, `src/run.py` vs `src/graph.py`. Also update the `AgentState` field list in CLAUDE.md.
+- [x] Architecture open questions (section 6) all decided: critic verdicts (D13), `ENABLE_RETRY` scope (D1), `src/run.py` (D23-D26).

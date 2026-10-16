@@ -24,6 +24,9 @@ class AgentState(TypedDict):
     current_step: int  # index into plan, 0-based
     step_results: list[str]  # approved output of each finished step
     last_output: str  # executor output for the current step, waiting for the critic
+    # WHY: the critic sees only text, so without this it rejects correct work ("no tool call
+    # shown") and burns retries and replans. Real runs R2-R5 showed it.
+    last_tools: str  # log of the tool calls behind `last_output`, written by the executor
     verdict: str  # "approve", "retry", or "" before the first verdict
     feedback: str  # critic's explanation, passed to the executor or the planner
     retries: int  # retries used on the current step
@@ -33,6 +36,9 @@ class AgentState(TypedDict):
     # WHY: `advance` stores its decision here, so the edge function only reads it. After
     # `advance` moves the counters, the decision cannot be worked out again from the state.
     route: str  # a Route value, "" before the first decision
+    # WHY: `run_task` catches every crash. The benchmark must still tell a usage cap or
+    # connection error from an agent failure, so the exception type and message stay here.
+    error: str  # "" or "<ExceptionType>: <message>", set only by `run_task`
 
 
 def initial_state(task: str, run_id: str) -> AgentState:
@@ -46,9 +52,12 @@ def initial_state(task: str, run_id: str) -> AgentState:
         A state with every field set, so no node has to guess a missing key.
 
     Raises:
-        ValueError: if the task is empty or longer than `MAX_TASK_CHARS`.
+        ValueError: if the task is not a string, is empty, or is longer than `MAX_TASK_CHARS`.
     """
-    # WHY: refuse a bad task here, before any prompt is built or any LLM call is made.
+    # WHY: refuse a bad task here, before any prompt is built or any LLM call is made. A
+    # benchmark file with a number or null as the task must give one failed run, not a crash.
+    if not isinstance(task, str):
+        raise ValueError("task must be a string")
     task = task.strip()
     if not task:
         raise ValueError("task must not be empty")
@@ -62,6 +71,7 @@ def initial_state(task: str, run_id: str) -> AgentState:
         current_step=0,
         step_results=[],
         last_output="",
+        last_tools="",
         verdict="",
         feedback="",
         retries=0,
@@ -69,4 +79,5 @@ def initial_state(task: str, run_id: str) -> AgentState:
         final_answer="",
         status="running",
         route="",
+        error="",
     )

@@ -9,6 +9,12 @@ My commands and prompts for this project. Claude Code appends to this file; I ca
 source .venv/bin/activate
 ```
 
+### Run a task
+```bash
+python -m src.run "your task here"
+```
+Runs one task with the Planner, Executor and Critic. Shows the events live in colour and writes the trace to `logs/<run_id>.jsonl`. Needs `OLLAMA_MODEL` in `.env`. Exit code 0 done, 1 failed, 2 configuration error.
+
 ## Claude Code commands
 <!-- slash commands and subagents, with one line each on what they do -->
 
@@ -35,3 +41,22 @@ No extra description: the spec was built from the roadmap entry for session 3 an
 /create-spec executor
 ```
 No extra description: built from the roadmap entry for session 4, `docs/specs/architecture.md`, and the session 3 code-review findings. Use this short form when the roadmap already describes the session well. Model: opus, effort high.
+
+### 2026-10-16: Spec for session 5, tracing-and-first-runs
+```
+/create-spec tracing-and-first-runs
+```
+No extra description: built from the roadmap entry for session 5, `docs/specs/architecture.md`, and decisions D5, D6, D12, D15 and D18. Use this short form when the roadmap already describes the session well. Model: opus, effort high.
+
+### 2026-10-16: Implement session 5 in one go
+```
+/implement
+do all the step at once don't ask again and again also remember this that while implementing just ask once at the starting saying it will include these many steps and if user says go then implement all at once without asking again and again
+```
+Use it to build a whole plan after one go-ahead. Claude stops only on a failed check or at a step that needs you (real LLM runs, `.env`). Model: sonnet, effort medium.
+
+### 2026-10-16: Fix review findings, then merge
+```
+fix it and then merge
+```
+Said after `/code-review` listed findings and asked which to fix. Claude fixed all Warnings and deferred the Suggestions (D31); the merge itself is done by Gaurav with `/git-feature`. Model: sonnet, effort medium.

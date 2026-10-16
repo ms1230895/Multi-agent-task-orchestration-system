@@ -11,6 +11,7 @@ EXPECTED_FIELDS = {
     "current_step",
     "step_results",
     "last_output",
+    "last_tools",
     "verdict",
     "feedback",
     "retries",
@@ -18,6 +19,7 @@ EXPECTED_FIELDS = {
     "final_answer",
     "status",
     "route",
+    "error",
 }
 
 
@@ -31,6 +33,7 @@ def test_ac1_initial_state_returns_all_fields_with_start_values() -> None:
         "current_step": 0,
         "step_results": [],
         "last_output": "",
+        "last_tools": "",
         "verdict": "",
         "feedback": "",
         "retries": 0,
@@ -38,8 +41,9 @@ def test_ac1_initial_state_returns_all_fields_with_start_values() -> None:
         "final_answer": "",
         "status": "running",
         "route": "",
+        "error": "",
     }
-    assert len(state) == 13
+    assert len(state) == 15
 
 
 @pytest.mark.parametrize("task", ["", "   ", "x" * (MAX_TASK_CHARS + 1)])
@@ -61,4 +65,11 @@ def test_ac2_initial_state_accepts_task_at_max_length() -> None:
 def test_ac3_agent_state_annotations_match_spec_fields() -> None:
     # WHY: the field list is documented in the spec and CLAUDE.md; drift must be noticed.
     assert set(AgentState.__annotations__) == EXPECTED_FIELDS
-    assert len(AgentState.__annotations__) == 13
+    assert len(AgentState.__annotations__) == 15
+
+
+@pytest.mark.parametrize("task", [None, 123, ["a"], b"bytes"])
+def test_review_initial_state_non_string_task_raises_value_error(task: object) -> None:
+    # WHY: `run_task` turns this into one failed run; an AttributeError would escape it.
+    with pytest.raises(ValueError, match="string"):
+        initial_state(task, "r1")  # type: ignore[arg-type]

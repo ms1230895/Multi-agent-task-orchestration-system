@@ -84,3 +84,40 @@ It is gone from `src/`; the graph tests pass it explicitly. `RecordingFakeLLM` f
 Not fixed in session 4:
 - **Warnings:** one shared `ask_validated` helper for planner and critic (duplicated re-ask flow); a whole-graph test that the state is clean after a replan (AC38); two outdated lines in `architecture.md` (the planner failure "router then finalizes", and finalize "logs `run_end`", which is session 5); progress and AC checkboxes.
 - **Suggestions:** cap `parse_json_model` input and make the fence regex linear; cap `last_output` stored in `step_results` (the executor now caps new outputs at 4000); `recursion_limit` enforced in `build_graph`; misplaced `# WHY:` in `finalize`; unused `Status` and `VerdictValue` aliases; weak AC26 assertion; `or` defaults in `build_graph` (the executor default is now `is not None`); a test for the brace limitation in `parse_json_model`; missing docstrings and `# WHY:` in tests.
+
+## Session 5: tracing-and-first-runs (2026-10-16)
+
+### D23. `run_task` writes `run_end`, not `finalize`
+`finalize` writes no event. `run_task` writes the one `run_end` after the graph ends or crashes. **Why:** a crash means `finalize` never runs, and every run must have exactly one `run_end` (it is what we count as a traced run). It also lets `run_end` hold the settings, counters and duration, which `run_task` already has. This changes one line of the architecture, which is updated.
+
+### D24. `AgentState` has an `error` field
+`""` normally; `"<ExceptionType>: <message>"` (message cut to 300 chars) when `run_task` caught a crash or refused the task. **Why:** `run_task` never raises, so the benchmark needs another way to see that a run ended because of a usage cap or connection error and must be paused, not counted as an agent failure (D12). The alternative, a separate result object, would change the `run_task` signature.
+
+### D25. `ConfigError` is the one exception `run_task` raises
+**Why:** without valid settings there is no model name to put in a trace and nothing ran. The CLI turns it into exit code 2 and a short message.
+
+### D26. Live events by callback, not a generator
+`run_task(on_record=...)` is called with every trace record. **Why:** it works inside `call_tool`, which is not a graph node, a learner can follow it line by line, and Streamlit can update a page from a callback. A generator would need a thread or LangGraph streaming.
+
+### D27. `critic_verdict` carries the executor output
+The event has an `output` field (cut to 500 chars). **Why:** the executor has no event of its own, and without this a trace never shows what the executor answered, which is the first thing needed to debug a failed step in session 7.
+
+### D28. `trim` and `emit_safely` live in `src/logger.py`
+Moved from `src/validation.py` (`_trim`, `_emit`), behaviour unchanged. **Why:** the planner, critic, `advance` and the gate all need them, and one copy keeps the safe-callback rule (D5) in one place. Partly settles the "one shared `_trim` helper" item deferred in D8.
+
+### D29. The test spy for `call_tool` accepts `on_event`
+`CallToolSpy` in `tests/agents/test_executor.py` got an `on_event` keyword. **Why:** the executor now passes `on_event` to every `call_tool`, as the real gate accepts it. Spec AC17 said the old tests should pass unchanged; this is the one test helper that had to change, and no assertion changed.
+
+### D30. The critic sees the tool calls (`last_tools`)
+Added after the first real runs. The executor writes a short log of its tool calls to the new state field `last_tools`, and the critic gets it in a `<tools>` data block. **Why:** in runs R2 to R5 the critic saw only the executor's text and rejected correct work ("does not show the tool being invoked"). R3 used 3 retries and a replan for a one-line file write. It also "corrected" a right calculator result with wrong arithmetic (R5). Wasted retries cost quota and would lower the benchmark success rate for a reason unrelated to the agent's skill. **Decided with Gaurav (2026-10-16) to fix it in this branch**, before the benchmark, so the baseline passes are not measured against a blind critic. **Limits:** 150 chars per part, 1500 for the log (guesses; check the traces). Hardened after the code review (D31): one call is always one line, and a long log keeps the newest calls. **Risk:** the critic now trusts the log, so a tool that returns a wrong value is believed; the log does not prove the value is right.
+
+### D31. Code-review fixes (session 5)
+`/code-review` found 0 Critical and 8 Warnings. All Warnings were fixed, with tests (suite grew from 487 to 510 tests).
+- **Tool log hardened.** Each part of a log line is collapsed to single-spaced text, so a tool result with newlines (or U+2028) cannot forge a log line the critic would trust. `ok: None` is now `ok:`. A log over 1500 chars drops its oldest whole lines (`(earlier calls omitted)`), so the newest call stays visible; cutting the end would have hidden the last `write_file`, the exact case D30 was meant to fix. The critic prompt no longer calls the log "evidence": it shows which tools were called, and the text after `->` is data that may be wrong.
+- **Trace format.** Lines are written with `ensure_ascii=True`, and `read_trace` splits on `"\n"` only. **Why:** U+2028 in web text made `splitlines()` cut a record in half, and a lone surrogate made the write fail and could lose the `run_end`.
+- **Terminal.** `sanitize()` in `src/console.py` replaces control characters (ESC, DEL, C1) with `?` and indents continuation lines; used for every event, the final answer and the config error. `emoji=False` is set too. `print_record` now takes its colours from `EVENT_COLOURS`, and a missing or odd `step` no longer raises.
+- **`initial_state` refuses a non-string task** with `ValueError`, so a bad benchmark entry is one failed run and not a crash.
+- **New tests:** a replan path end to end, the retry counters by kind, and one regression test per fix above.
+
+**Deferred (not fixed, decide later):** trim nested argument values in `_loggable_args`; log an allowlist of settings instead of `model_dump()` in `run_end.config`; redact local paths and `input_value=` from exception text; check `run_id` against a pattern in `TraceLogger`; a wall-clock cap on a whole run (already the case before this branch); `read_trace` skipping a half-written last line; reporting `write_errors` in `run_end` or the CLI; event-name constants so a typo is not swallowed by `emit_safely`; `ensure_ascii` and shared constants in the executor log; tidy the failed-state code and the `on_record` try/except in `run.py`; share the test helpers `_collector` and `_broken_callback` in `tests/fakes.py` and merge the overlapping executor AC20/AC43 tests; Ctrl-C leaves a trace with no `run_end` (by design, documented). **Not changed:** `data_block` still neutralises only its own closing tag, not the other block tags.
+

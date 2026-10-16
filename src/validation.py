@@ -15,6 +15,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from src.config import Settings, get_settings
+from src.logger import EventCallback, emit_safely, trim
 from src.tools import TOOLS
 from src.tools.base import TRANSIENT_PREFIX, ToolResult, failure, is_transient
 
@@ -23,13 +24,6 @@ MAX_LOGGED_ARG_CHARS = 200
 MAX_LOGGED_NAME_CHARS = 100
 MAX_BACKOFF_S = 4
 
-EventCallback = Callable[[str, dict[str, Any]], None]
-
-
-def _trim(text: str, limit: int) -> str:
-    """Cut text to at most `limit` characters in total, ending with `…` when cut."""
-    return text if len(text) <= limit else text[: limit - 1] + "…"
-
 
 def _loggable_args(args: Any) -> Any:
     """Copy the arguments for an event, cutting long strings.
@@ -37,25 +31,11 @@ def _loggable_args(args: Any) -> Any:
     WHY: `write_file` content can be 100 000 characters; a trace line should stay small.
     """
     if not isinstance(args, Mapping):
-        return _trim(repr(args), MAX_LOGGED_ARG_CHARS)
+        return trim(repr(args), MAX_LOGGED_ARG_CHARS)
     return {
-        key: _trim(value, MAX_LOGGED_ARG_CHARS) if isinstance(value, str) else value
+        key: trim(value, MAX_LOGGED_ARG_CHARS) if isinstance(value, str) else value
         for key, value in args.items()
     }
-
-
-def _emit(on_event: EventCallback | None, event: str, data: dict[str, Any]) -> None:
-    """Send an event to the optional callback, never letting it break the tool call.
-
-    WHY: logging is a side job. If the logger fails, the tool result must still reach the
-    executor, so a callback error is ignored.
-    """
-    if on_event is None:
-        return
-    try:
-        on_event(event, data)
-    except Exception:  # noqa: BLE001 - see WHY above
-        pass
 
 
 def _format_validation_errors(exc: ValidationError) -> list[dict[str, str]]:
@@ -124,7 +104,7 @@ def call_tool(
     attempts = 0
     # WHY: the name comes from the LLM, so it may be any type and any length. Make a short
     # text version once, and use it wherever the name is shown or logged.
-    shown_name = _trim(str(name), MAX_LOGGED_NAME_CHARS)
+    shown_name = trim(str(name), MAX_LOGGED_NAME_CHARS)
 
     def finish(result: ToolResult) -> ToolResult:
         """Emit the one `tool_call` event for this call and return the result."""
@@ -136,10 +116,10 @@ def call_tool(
             "duration_ms": int((time.perf_counter() - started) * 1000),
         }
         if result["ok"]:
-            data["output"] = _trim(result["output"] or "", MAX_LOGGED_CHARS)
+            data["output"] = trim(result["output"] or "", MAX_LOGGED_CHARS)
         else:
-            data["error"] = _trim(result["error"] or "", MAX_LOGGED_CHARS)
-        _emit(on_event, "tool_call", data)
+            data["error"] = trim(result["error"] or "", MAX_LOGGED_CHARS)
+        emit_safely(on_event, "tool_call", data)
         return result
 
     # STEP 1: does the tool exist?
@@ -163,7 +143,7 @@ def call_tool(
             kwargs = schema.model_validate(args).model_dump()
         except ValidationError as exc:
             errors = _format_validation_errors(exc)
-            _emit(
+            emit_safely(
                 on_event,
                 "validation_error",
                 {"tool": name, "args": _loggable_args(args), "errors": errors},
@@ -181,14 +161,14 @@ def call_tool(
         if result["ok"] or not is_transient(result) or attempts > extra_attempts:
             break
         retry_number = attempts  # 1 for the first extra attempt, 2 for the second, ...
-        _emit(
+        emit_safely(
             on_event,
             "retry",
             {
                 "kind": "tool",
                 "tool": name,
                 "attempt": retry_number,
-                "reason": _trim(result["error"] or "", MAX_LOGGED_CHARS),
+                "reason": trim(result["error"] or "", MAX_LOGGED_CHARS),
             },
         )
         # WHY: waiting 1 s, 2 s, 4 s (at most) gives a rate limit or timeout time to clear.

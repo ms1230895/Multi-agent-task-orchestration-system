@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, field_validator
 from src.agents.parsing import parse_json_model, reply_text
 from src.agents.prompting import data_block
 from src.config import MAX_PLAN_STEPS
+from src.logger import MAX_TRACE_TEXT_CHARS, EventCallback, emit_safely, trim
 from src.state import AgentState
 from src.tools import TOOLS
 
@@ -78,12 +79,16 @@ def _build_messages(state: AgentState) -> list[BaseMessage]:
     return [SystemMessage(PLANNER_SYSTEM_PROMPT), HumanMessage(text)]
 
 
-def run_planner(state: AgentState, *, llm: BaseChatModel) -> dict[str, Any]:
+def run_planner(
+    state: AgentState, *, llm: BaseChatModel, on_event: EventCallback | None = None
+) -> dict[str, Any]:
     """Make a plan (or a new one after a failure) and return the state fields it changes.
 
     Args:
         state: the current run state.
         llm: the chat model to ask. Shared with the critic, so one run uses one model.
+        on_event: optional callback `(event, data)`. A valid plan emits `plan_created`, or
+            `replan` when this is a replan. A failed plan emits nothing.
 
     Returns:
         A valid plan resets the per-plan counters and `status="running"`. An invalid plan
@@ -114,6 +119,21 @@ def run_planner(state: AgentState, *, llm: BaseChatModel) -> dict[str, Any]:
     if plan is None:
         return {"plan": [], "status": "failed"}
 
+    # WHY: the first plan and a replan are different events in the trace; a replan also records
+    # why (the critic's last feedback), which is cleared from the state just below.
+    if state["replans"] > 0:
+        emit_safely(
+            on_event,
+            "replan",
+            {
+                "replans": state["replans"],
+                "steps": plan.steps,
+                "reason": trim(state["feedback"], MAX_TRACE_TEXT_CHARS),
+            },
+        )
+    else:
+        emit_safely(on_event, "plan_created", {"steps": plan.steps})
+
     # WHY: a new plan starts from step 0 with fresh counters and no old verdict, but keeps
     # `replans`, which counts the whole run.
     return {
@@ -122,6 +142,7 @@ def run_planner(state: AgentState, *, llm: BaseChatModel) -> dict[str, Any]:
         "retries": 0,
         "step_results": [],
         "last_output": "",
+        "last_tools": "",
         "verdict": "",
         "feedback": "",
         "status": "running",

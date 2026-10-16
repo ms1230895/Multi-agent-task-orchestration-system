@@ -21,7 +21,8 @@ class RecordingFakeLLM(BaseChatModel):
     The role is found from a marker in the system prompt ("You are the planner", "You are the
     critic", "You are the executor"); an unknown role raises, so a changed prompt cannot
     silently get the wrong replies. When a script runs out, its last reply repeats (useful for
-    an always-retry critic). If `error` is set, every call raises it.
+    an always-retry critic). If `error` is set, every call raises it; `role_errors` raises only
+    for the roles it names.
     """
 
     planner_replies: list[str] = Field(default_factory=list)
@@ -30,6 +31,8 @@ class RecordingFakeLLM(BaseChatModel):
     executor_replies: list[AIMessage] = Field(default_factory=list)
     bound_tools: list[Any] = Field(default_factory=list)
     error: Exception | None = None
+    # WHY: lets a test crash one role only (for example the critic, after a plan exists).
+    role_errors: dict[str, Exception] = Field(default_factory=dict)
     calls: list[list[BaseMessage]] = Field(default_factory=list)
     roles: list[str] = Field(default_factory=list)
 
@@ -62,6 +65,8 @@ class RecordingFakeLLM(BaseChatModel):
         else:
             raise ValueError("RecordingFakeLLM: unknown role in the system prompt")
         self.roles.append(role)
+        if role in self.role_errors:
+            raise self.role_errors[role]
         index = sum(1 for r in self.roles if r == role) - 1
         if role == "executor":
             reply = self.executor_replies[min(index, len(self.executor_replies) - 1)]
