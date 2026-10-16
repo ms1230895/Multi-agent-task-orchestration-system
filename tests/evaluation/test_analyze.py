@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 
+import evaluation.passes as passes_module
 from benchmark.runner import PROJECT_ROOT
 from evaluation import analyze
 from evaluation.analyze import analyze_pass, classify, error_kind
@@ -147,7 +148,7 @@ def test_rejections_without_tool_and_iteration_limit_hits_are_counted_ac15_ac16(
     assert analysis["iteration_limit_hits"] == 1
 
 
-def test_tool_not_used_lists_only_tasks_missing_their_expected_tool_ac17() -> None:
+def test_tool_not_used_lists_only_tasks_missing_their_expected_tool_ac17(tmp_path: Path) -> None:
     """AC17: four categories each list one task without its tool; the satisfied ones are absent."""
 
     # WHY: D39 says a model can answer without its tool; this list shows how often, for
@@ -166,7 +167,7 @@ def test_tool_not_used_lists_only_tasks_missing_their_expected_tool_ac17() -> No
         ok("m-good", "multi-tool", ["calculator", "write_file"]),
     ])  # fmt: skip
 
-    unused = analyze_pass(data, Path("/nonexistent-logs"))["tool_not_used"]
+    unused = analyze_pass(data, tmp_path / "logs")["tool_not_used"]
 
     assert [(u["task_id"], u["expected"]) for u in unused] == [
         ("s-bad", "web_search"),
@@ -183,6 +184,7 @@ def test_analyze_main_lists_missing_trace_writes_out_file_and_refuses_bad_pass_a
     # WHY: a deleted `logs/` must not stop the analysis, and the saved file must be exactly
     # what was printed; a bad pass must exit 2 without writing anything.
     root, logs = tmp_path / "results", tmp_path / "logs"
+    monkeypatch.setattr(passes_module, "OUTPUT_ROOT", tmp_path)
     write_trace(logs, "run-ok", [("plan_created", {"steps": ["a"]})])
     results = [_result("t1", "gone"), _result("t2", "run-ok", success=True, status="done")]
     data = dataclasses.replace(make_data("p1", n_tasks=2), results=results)
@@ -213,16 +215,17 @@ def test_digests_are_one_per_failure_single_line_redacted_and_capped_ac19(tmp_pa
     """AC19: one digest per non-success in task order; no newline or backtick; caps hold."""
     # WHY: digests go into a committed Markdown file and hold untrusted web and model text;
     # they must not break the Markdown, leak the local path, or grow without limit.
+    # NOTE: the filler letters are not hex digits; a 32+ character hex run is redacted as a secret.
     logs = tmp_path / "logs"
     write_trace(logs, "run1", [
         ("plan_created", {"steps": ["step `one`\nline"]}),
-        _verdict("retry", feedback="`bad`\n" + "F" * 500),
+        _verdict("retry", feedback="`bad`\n" + "Q" * 500),
         *[
-            _call("read_file", {"path": "P" * 300 + str(i)}, error="E" * 300 + "\nnew")
+            _call("read_file", {"path": "P" * 300 + str(i)}, error="X" * 300 + "\nnew")
             for i in range(12)
         ],
     ])  # fmt: skip
-    hostile = f"{PROJECT_ROOT}/private `a`\n" + "A" * 400
+    hostile = f"{PROJECT_ROOT}/private `a`\n" + "Z" * 400
     data = pass_of([
         _result("t0", "ra", success=True),
         _result("t1", "run1", final_answer=hostile),
@@ -239,9 +242,42 @@ def test_digests_are_one_per_failure_single_line_redacted_and_capped_ac19(tmp_pa
         assert "\n" not in text and "`" not in text
         assert str(PROJECT_ROOT) not in text
     assert first["final_answer"].startswith("<project>/private 'a'")
-    assert len(first["final_answer"]) <= 300
-    assert len(first["critic"][0]) <= len("step 1 retry: ") + 200
+    # WHY: `==`, not `<=`: a cut to 50 characters would also pass a "no more than" check.
+    assert len(first["final_answer"]) == 300
+    assert len(first["critic"][0]) == len("step 1 retry: ") + 200
     assert len(first["failed_calls"]) == 10
     for call in first["failed_calls"]:
-        assert len(call.split(" -> ", 1)[1]) <= 150
+        assert len(call.split(" -> ", 1)[1]) == 150
         assert len(call) <= len("read_file() -> ") + 150 + 150
+
+
+def test_untrusted_fields_cannot_break_the_markdown_or_leak_paths_and_secrets(
+    tmp_path: Path,
+) -> None:
+    """Review finding 1 and 4: hostile ids, names and error text are made safe everywhere."""
+    # WHY: results and traces hold model output and web text and the analysis is committed.
+    # A forged heading, a pipe, an HTML comment or a key must not reach the file.
+    logs = tmp_path / "logs"
+    secret = "sk-abcdefghijklmnopqrstuv"
+    write_trace(logs, "run1", [
+        ("plan_created", {"steps": ["a"]}),
+        _call(
+            "evil|tool\n# forged heading",
+            {},
+            error="/Users/someone/x " + secret + " | <!--x-->",
+        ),
+    ])  # fmt: skip
+    data = pass_of(
+        [
+            _result("t|1 <!-- c -->", "run1", category="f|ile"),
+            _result("t2", "../../escape"),
+        ]
+    )
+    analysis = analyze_pass(data, logs)
+    text = analyze.render_analysis("p1", analysis)
+    assert analysis["missing_traces"] == ["../../escape"]
+    assert "\n# forged" not in text and "<!--" not in text and secret not in text
+    assert "someone" not in text
+    for line in text.splitlines():
+        assert not line.startswith("# forged")
+    assert "evil\\|tool" in text and "t\\|1" in text

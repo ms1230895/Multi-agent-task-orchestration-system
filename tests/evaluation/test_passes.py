@@ -37,7 +37,8 @@ def test_load_pass_reads_pass_folder_and_refuses_bad_input_ac1(tmp_path: Path) -
     write_pass(tmp_path, make_data("p2", n_tasks=3, n_results=3))
     assert load_pass("p2", results_root=tmp_path).complete is True
 
-    for bad_id in ("../x", "Main"):
+    # NOTE: "p2\n" is refused too: `$` would accept a trailing newline, `fullmatch` does not.
+    for bad_id in ("../x", "Main", "p2\n"):
         with pytest.raises(ReportError, match="invalid pass id"):
             load_pass(bad_id, results_root=tmp_path)
     with pytest.raises(ReportError, match="no such pass"):

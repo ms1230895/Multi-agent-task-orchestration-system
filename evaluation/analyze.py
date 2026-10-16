@@ -16,10 +16,17 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Literal
 
-from benchmark.runner import _redact, is_infra_error
-from evaluation.passes import PassData, ReportError, load_pass
+from benchmark.runner import is_infra_error
+from evaluation.passes import (
+    PassData,
+    ReportError,
+    checked_output_path,
+    load_pass,
+    load_run_trace,
+    md_safe,
+    write_text_atomic,
+)
 from src.config import LOGS_DIR
-from src.logger import read_trace, trace_path
 
 OutcomeClass = Literal[
     "success",
@@ -54,30 +61,8 @@ MAX_DIGEST_DETAIL = 200
 MAX_DIGEST_FIELD = 150
 MAX_DIGEST_FAILED_CALLS = 10
 
-# WHY: a run id comes from a committed results file, which is untrusted data. It becomes part
-# of a file path, so only the characters of a real run id are allowed (no `/` or `..`).
-_RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _DIGITS = re.compile(r"\d")
 _SPACES = re.compile(r"\s+")
-_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
-
-
-def load_run_trace(run_id: Any, logs_dir: Path = LOGS_DIR) -> list[dict[str, Any]] | None:
-    """Read the trace of one run.
-
-    Returns:
-        The records in order, or None when the id is not a valid run id, the file is missing,
-        or the file cannot be read. Records that are not JSON objects are dropped.
-
-    WHY: a missing trace must not stop the analysis of the other runs (it is listed instead).
-    """
-    if not isinstance(run_id, str) or not _RUN_ID_PATTERN.match(run_id):
-        return None
-    try:
-        records = read_trace(trace_path(run_id, logs_dir))
-    except (OSError, ValueError, RecursionError):
-        return None
-    return [record for record in records if isinstance(record, dict)]
 
 
 def events_of(trace: list[dict[str, Any]], name: str) -> list[dict[str, Any]]:
@@ -222,20 +207,6 @@ def unused_expected_tool(result: dict[str, Any]) -> str | None:
     return None
 
 
-def _one_line(value: Any, limit: int) -> str:
-    """Make untrusted text safe for a committed Markdown file.
-
-    The text is redacted (local paths, URL queries), stripped of control characters, put on
-    one line, has its backticks replaced by `'`, and is cut to `limit` characters.
-
-    WHY: results and traces hold web text and model output. A digest must not hold a local
-    path, break the Markdown, or carry a line that looks like a heading.
-    """
-    text = _redact(str(value if value is not None else ""))
-    text = _SPACES.sub(" ", _CONTROL.sub(" ", text)).replace("`", "'").strip()
-    return text if len(text) <= limit else text[: limit - 1] + "…"
-
-
 def make_digest(
     result: dict[str, Any], outcome: OutcomeClass, trace: list[dict[str, Any]] | None
 ) -> dict[str, Any]:
@@ -247,7 +218,7 @@ def make_digest(
     """
     checks = result.get("checks")
     failed_checks = [
-        _one_line(f"{c.get('type')} on {c.get('source')}: {c.get('detail')}", MAX_DIGEST_DETAIL)
+        md_safe(f"{c.get('type')} on {c.get('source')}: {c.get('detail')}", MAX_DIGEST_DETAIL)
         for c in (checks if isinstance(checks, list) else [])
         if isinstance(c, dict) and c.get("passed") is not True
     ]
@@ -259,31 +230,31 @@ def make_digest(
             for data in events_of(trace, name):
                 steps = data.get("steps")
                 plan = (
-                    [_one_line(s, MAX_DIGEST_FIELD) for s in steps]
+                    [md_safe(s, MAX_DIGEST_FIELD) for s in steps]
                     if isinstance(steps, list)
                     else plan
                 )
         for data in events_of(trace, "critic_verdict"):
             verdicts.append(
-                f"step {data.get('step')} {data.get('verdict')}: "
-                + _one_line(data.get("feedback"), MAX_DIGEST_FEEDBACK)
+                f"step {md_safe(data.get('step'), 10)} {md_safe(data.get('verdict'), 20)}: "
+                + md_safe(data.get("feedback"), MAX_DIGEST_FEEDBACK)
             )
         for data in failed_calls(trace)[:MAX_DIGEST_FAILED_CALLS]:
             args = json.dumps(data.get("args"), sort_keys=True, default=str)
             calls.append(
-                f"{_one_line(data.get('tool'), MAX_DIGEST_FIELD)}"
-                f"({_one_line(args, MAX_DIGEST_FIELD)}) -> "
-                + _one_line(data.get("error"), MAX_DIGEST_FIELD)
+                f"{md_safe(data.get('tool'), MAX_DIGEST_FIELD)}"
+                f"({md_safe(args, MAX_DIGEST_FIELD)}) -> "
+                + md_safe(data.get("error"), MAX_DIGEST_FIELD)
             )
     return {
-        "task_id": str(result.get("task_id")),
+        "task_id": md_safe(result.get("task_id"), 64),
         "outcome": outcome,
-        "run_id": _one_line(result.get("run_id"), 64),
+        "run_id": md_safe(result.get("run_id"), 64),
         "failed_checks": failed_checks,
         "plan": plan,
         "critic": verdicts,
         "failed_calls": calls,
-        "final_answer": _one_line(result.get("final_answer"), MAX_DIGEST_ANSWER),
+        "final_answer": md_safe(result.get("final_answer"), MAX_DIGEST_ANSWER),
     }
 
 
@@ -318,7 +289,7 @@ def analyze_pass(data: PassData, logs_dir: Path = LOGS_DIR) -> dict[str, Any]:
         trace = load_run_trace(result.get("run_id"), logs_dir)
         outcome = classify(result, trace)
         outcomes[outcome] += 1
-        category = str(result.get("category", "unknown"))
+        category = md_safe(result.get("category", "unknown"), 30)
 
         raw_counters = result.get("counters")
         counters: dict[str, Any] = raw_counters if isinstance(raw_counters, dict) else {}
@@ -331,20 +302,23 @@ def analyze_pass(data: PassData, logs_dir: Path = LOGS_DIR) -> dict[str, Any]:
 
         expected = unused_expected_tool(result)
         if expected is not None:
-            not_used.append({"task_id": str(result.get("task_id")), "expected": expected})
+            not_used.append({"task_id": md_safe(result.get("task_id"), 64), "expected": expected})
 
         if trace is None:
-            missing.append(str(result.get("run_id")))
+            missing.append(md_safe(result.get("run_id"), 64))
         else:
             for call in failed_calls(trace):
-                key = (str(call.get("tool")), error_kind(call.get("error")))
+                key = (
+                    md_safe(call.get("tool"), MAX_DIGEST_FIELD),
+                    md_safe(error_kind(call.get("error")), 60),
+                )
                 entry = failed.setdefault(
                     key,
                     {
                         "tool": key[0],
                         "kind": key[1],
                         "count": 0,
-                        "example_run": result.get("run_id"),
+                        "example_run": md_safe(result.get("run_id"), 64),
                     },
                 )
                 entry["count"] += 1
@@ -457,14 +431,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, help="write the Markdown to this file too")
     args = parser.parse_args(argv)
     try:
+        # WHY: the output path is checked before any work, so a refused path costs nothing and
+        # never overwrites a file outside `docs/` (review finding 3).
+        out_path = checked_output_path(args.out) if args.out is not None else None
         data = load_pass(args.pass_id)
+        text = render_analysis(data.pass_id, analyze_pass(data))
+        if out_path is not None:
+            write_text_atomic(out_path, text)
     except ReportError as error:
         print(f"refused: {error}", file=sys.stderr)
         return 2
-    text = render_analysis(data.pass_id, analyze_pass(data))
-    if args.out is not None:
-        args.out.parent.mkdir(parents=True, exist_ok=True)
-        args.out.write_text(text, encoding="utf-8")
     print(text)
     return 0
 

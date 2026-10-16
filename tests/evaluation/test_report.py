@@ -6,12 +6,14 @@ tests wrap `load_pass` and `render_markdown` to point at `tmp_path`, and patch t
 the LLM factory to raise, which proves nothing is run.
 """
 
+import dataclasses
 from pathlib import Path
 from typing import Any, NoReturn
 
 import pytest
 
 import benchmark.runner
+import evaluation.passes as passes_module
 import src.config
 from evaluation import report
 from evaluation.passes import PassData, ReportError, group_passes
@@ -42,7 +44,7 @@ def test_ablation_row_reduction_cases_ac5(tmp_path: Path) -> None:
     no_logs = tmp_path / "no-logs"
     cases = [
         (10, 8, 0.2, "20.0%"),
-        (0, 0, None, None),
+        (0, 0, None, "+0.0 | n/a |"),
         (8, 12, -0.5, "the gate added failed calls"),
     ]
     for off_failed, on_failed, reduction, text_part in cases:
@@ -89,6 +91,8 @@ def test_no_ablation_row_when_more_than_the_flags_differ_ac6() -> None:
     # A different model (plus the flags) is never an ablation row either.
     other_model = make_data("on-1", model="other-model", started_at=LATE)
     assert [r for r in _rows_of(off, other_model)[0] if r["kind"] == "ablation"] == []
+    # Spec 5.3: a pair with a different model gets no "not compared" line either.
+    assert _rows_of(off, other_model)[1] == []
 
 
 def test_model_row_and_fix_row_with_earlier_group_as_before_ac7() -> None:
@@ -190,6 +194,7 @@ def test_report_main_exit_codes_and_nothing_is_run_ac11(
     # WHY: the report is read-only. If it ever called the runner or the LLM factory, a report
     # would spend quota; the patched functions raise so such a call fails the test.
     root = tmp_path / "results"
+    monkeypatch.setattr(passes_module, "OUTPUT_ROOT", tmp_path)
     write_pass(root, make_data("a", validation=False, retry=False, started_at=EARLY))
     write_pass(root, make_data("b", started_at=LATE))
     real_load, real_render = report.load_pass, report.render_markdown
@@ -215,3 +220,55 @@ def test_report_main_exit_codes_and_nothing_is_run_ac11(
     target = tmp_path / "new" / "results.md"
     assert report.main(["--passes", "a,b", "--write", str(target)]) == 0
     assert START_MARKER in target.read_text(encoding="utf-8")
+
+
+def test_write_block_keeps_exact_bytes_and_write_paths_are_limited_to_md_in_docs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review findings 3 and 2: CRLF text outside the markers survives; unsafe paths are refused."""
+    # WHY: the hand-written text around the block must stay byte for byte (AC10), and a wrong
+    # `--write CLAUDE.md` must never overwrite a project file.
+    doc = tmp_path / "docs" / "results.md"
+    doc.parent.mkdir()
+    before, after = b"intro\r\n", b"\r\ntail\r\n"
+    doc.write_bytes(before + START_MARKER.encode() + b"\r\nold\r\n" + END_MARKER.encode() + after)
+    report.write_block(doc, "NEW")
+    written = doc.read_bytes()
+    assert written.startswith(before + START_MARKER.encode())
+    assert written.endswith(END_MARKER.encode() + after)
+    assert b"NEW" in written and b"old" not in written
+    with pytest.raises(ReportError):
+        report.write_block(tmp_path / "docs", "NEW")  # a folder is a clean refusal, not OSError
+
+    monkeypatch.setattr(passes_module, "OUTPUT_ROOT", tmp_path / "docs")
+    write_pass(tmp_path / "results", make_data("a"))
+    real_load = report.load_pass
+    monkeypatch.setattr(
+        report, "load_pass", lambda pid: real_load(pid, results_root=tmp_path / "results")
+    )
+    monkeypatch.setattr(report, "render_markdown", lambda passes: "block")
+    for outside in (tmp_path / "CLAUDE.md", tmp_path / "docs" / "notes.txt"):
+        assert report.main(["--passes", "a", "--write", str(outside)]) == 2
+        assert not outside.exists()
+
+
+def test_trace_coverage_counts_only_complete_traces_and_refuses_odd_run_ids(
+    tmp_path: Path,
+) -> None:
+    """Review finding 2: one `run_end`, last; bad ids and broken traces never count."""
+    # WHY: "traces across 100+ runs" is only true if each result has one complete trace; and a
+    # run id from a committed file must not make the tool read a file outside `logs/`.
+    logs = tmp_path / "logs"
+    end = ("run_end", {"status": "done"})
+    plan = ("plan_created", {"steps": ["a"]})
+    write_trace(logs, "good", [plan, end])
+    write_trace(logs, "two-ends", [plan, end, end])
+    write_trace(logs, "end-not-last", [end, plan])
+    write_trace(logs, "empty", [])
+    (tmp_path / "outside.jsonl").write_text('{"event": "run_end", "data": {}}\n', encoding="utf-8")
+    ids = ["good", "two-ends", "end-not-last", "empty", "missing", "../outside"]
+    data = make_data("p1", n_tasks=len(ids))
+    data = dataclasses.replace(
+        data, results=[{"task_id": f"t{i}", "run_id": r} for i, r in enumerate(ids)]
+    )
+    assert report.trace_coverage(data, logs) == (1, 6)

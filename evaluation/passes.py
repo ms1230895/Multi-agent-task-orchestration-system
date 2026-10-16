@@ -10,6 +10,8 @@ WHY this lives in `evaluation/` and not in `benchmark/`: the code fingerprint co
 
 import json
 import math
+import os
+import re
 import statistics
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -28,8 +30,11 @@ from benchmark.runner import (
     PassRefused,
     _read_manifest,
     _read_results,
+    _redact,
     summarize,
 )
+from src.config import LOGS_DIR, PROJECT_ROOT
+from src.logger import read_trace, trace_path, trim
 
 # NOTE: 1.96 is the z value of a two-sided 95% interval.
 Z_95 = 1.96
@@ -102,7 +107,8 @@ def load_pass(pass_id: str, results_root: Path = RESULTS_DIR) -> PassData:
     the same data and refuse the same broken input.
     """
     # WHY: the id becomes a folder name; the same pattern as the runner blocks `..` and `/`.
-    if not isinstance(pass_id, str) or not PASS_ID_PATTERN.match(pass_id):
+    # WHY: `fullmatch`, because `$` also accepts a trailing newline (review finding S1).
+    if not isinstance(pass_id, str) or not PASS_ID_PATTERN.fullmatch(pass_id):
         raise ReportError(f"invalid pass id: {str(pass_id)[:40]!r}")
     pass_dir = results_root / pass_id
     if not (pass_dir / MANIFEST_NAME).is_file():
@@ -285,3 +291,131 @@ def group_passes(passes: list[PassData]) -> list[PassGroup]:
             )
         )
     return sorted(groups, key=lambda group: group.started_at)
+
+
+# ---- Shared helpers: reading traces and cleaning untrusted text (review findings 1 to 4) ----
+
+# WHY: a run id comes from a committed results file, which is untrusted data. It becomes part of
+# a file path, so only the characters of a real run id are allowed (no `/` or `..`).
+RUN_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
+# WHY: the only folder the tools may write into. A wrong or injected `--out CLAUDE.md` must not
+# overwrite a project file (review finding 3). Tests point this at a temporary folder.
+OUTPUT_ROOT = PROJECT_ROOT / "docs"
+
+_CONTROL = re.compile("[\x00-\x1f\x7f-\x9f\u2028\u2029]")
+_SPACES = re.compile(r"\s+")
+
+# WHY: `_redact` (from the runner) only knows this machine's folders and URL queries. Trace text
+# also holds exception text we do not control, so common secret shapes and other people's home
+# folders are removed too (review finding 4). `benchmark/runner.py` is not edited: that would
+# change the code fingerprint.
+_EXTRA_REDACTIONS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\bsk-[A-Za-z0-9_-]{16,}"), "<secret>"),
+    (re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}"), "<secret>"),
+    (re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE), "Bearer <secret>"),
+    (re.compile(r"\b[0-9a-fA-F]{32,}\b"), "<secret>"),
+    (re.compile(r"://[^/\s@]+@"), "://<secret>@"),
+    (re.compile(r"/(?:Users|home)/[^/\s]+", re.IGNORECASE), "/<user>"),
+)
+
+
+def load_run_trace(run_id: object, logs_dir: Path = LOGS_DIR) -> list[dict[str, Any]] | None:
+    """Read the trace of one run.
+
+    Returns:
+        The records in order, or None when the id is not a valid run id, the file is missing,
+        or the file cannot be read. Records that are not JSON objects are dropped.
+
+    WHY: one function for both tools, so they validate a run id the same way. A missing trace
+    must not stop the analysis of the other runs (it is listed instead).
+    """
+    if not isinstance(run_id, str) or not RUN_ID_PATTERN.fullmatch(run_id):
+        return None
+    try:
+        records = read_trace(trace_path(run_id, logs_dir))
+    except (OSError, ValueError, RecursionError):
+        return None
+    return [record for record in records if isinstance(record, dict)]
+
+
+def one_line(value: object) -> str:
+    """Control characters (including U+2028) become spaces, and all whitespace is collapsed."""
+    return _SPACES.sub(" ", _CONTROL.sub(" ", str(value if value is not None else ""))).strip()
+
+
+def md_safe(value: object, limit: int) -> str:
+    """Make untrusted text safe to write into a committed Markdown file.
+
+    Args:
+        value: any value from a result line, a trace or a manifest.
+        limit: the most characters the result may have.
+
+    Returns:
+        One line of text: control characters removed, backticks changed to `'`, the characters
+        `|`, `<` and `[` escaped, local paths, URL queries and secret-like strings redacted,
+        and the whole cut to `limit` characters.
+
+    WHY: results and traces hold web text and model output. A task id, tool name or run id with
+    `\\n# heading`, a `|`, `<!-- ... -->` or `![](url)` must not break a table, hide text or add
+    a link to the docs, and a forged end marker must not make `write_block` refuse forever.
+    The escaping comes before the redaction on purpose: the `<project>` label the redaction
+    adds is ours and must stay readable.
+    """
+    text = one_line(value).replace("`", "'")
+    text = text.replace("|", "\\|").replace("<", "&lt;").replace("[", "\\[")
+    text = _redact(text)
+    for pattern, replacement in _EXTRA_REDACTIONS:
+        text = pattern.sub(replacement, text)
+    return trim(text, limit)
+
+
+def checked_output_path(path: Path) -> Path:
+    """Return the path to write to, or refuse it.
+
+    Raises:
+        ReportError: if the file is not a `.md` file inside `OUTPUT_ROOT` once symlinks are
+            resolved.
+
+    WHY: a wrong or injected `--out CLAUDE.md` or `--write .env` would silently overwrite a
+    project file (review finding 3).
+    """
+    resolved = path.resolve()
+    root = OUTPUT_ROOT.resolve()
+    if resolved.suffix != ".md" or not resolved.is_relative_to(root):
+        raise ReportError(f"output must be a .md file inside {root.name}/: {path.name}")
+    return resolved
+
+
+def read_text_exact(path: Path) -> str:
+    """Read a UTF-8 file without changing its line endings.
+
+    Raises:
+        ReportError: if the file cannot be read or is not valid UTF-8.
+
+    WHY: `read_text` turns `\\r\\n` into `\\n`, so a later write would change the text outside the
+    markers, which must stay byte for byte (AC10).
+    """
+    try:
+        return path.read_bytes().decode("utf-8")
+    except (OSError, UnicodeError):
+        raise ReportError(f"cannot read {path.name}") from None
+
+
+def write_text_atomic(path: Path, text: str) -> None:
+    """Write a UTF-8 file by writing a temporary file and renaming it.
+
+    Raises:
+        ReportError: if the folder or file cannot be written.
+
+    WHY: `write_text` truncates the file first, so a crash would lose the hand-written parts of
+    `docs/results.md`.
+    """
+    temporary = path.with_name(path.name + ".tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary.write_bytes(text.encode("utf-8"))
+        os.replace(temporary, path)
+    except OSError:
+        temporary.unlink(missing_ok=True)
+        raise ReportError(f"cannot write {path.name}") from None

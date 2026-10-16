@@ -16,12 +16,18 @@ from evaluation.passes import (
     PassData,
     PassGroup,
     ReportError,
+    checked_output_path,
     group_passes,
     load_pass,
+    load_run_trace,
+    md_safe,
+    one_line,
     pass_metrics,
+    read_text_exact,
+    write_text_atomic,
 )
 from src.config import LOGS_DIR
-from src.logger import read_trace, trace_path
+from src.logger import read_trace
 
 # NOTE: a comparison row is a plain dict so it can be printed as a table or saved as JSON.
 Comparison = dict[str, Any]
@@ -204,7 +210,7 @@ def _reason(first: PassGroup, second: PassGroup, differences: set[str]) -> str:
     """A "not compared" line naming the passes and what differs."""
     return (
         f"{group_label(first)} vs {group_label(second)}: not compared, "
-        f"they differ in {', '.join(sorted(differences))}"
+        f"they differ in {', '.join(sorted(md_safe(name, 60) for name in differences))}"
     )
 
 
@@ -247,13 +253,13 @@ def trace_coverage(data: PassData, logs_dir: Path = LOGS_DIR) -> tuple[int, int]
     """
     covered = 0
     for record in data.results:
-        run_id = record.get("run_id")
-        if not isinstance(run_id, str):
+        # WHY: the shared reader refuses a run id that is not a plain id (review finding 2), so
+        # a value like `../../x` in a committed results file cannot make the tool read a file
+        # outside `logs/`.
+        trace = load_run_trace(record.get("run_id"), logs_dir)
+        if not trace:
             continue
-        try:
-            events = [item.get("event") for item in read_trace(trace_path(run_id, logs_dir))]
-        except (OSError, ValueError, RecursionError, AttributeError):
-            continue
+        events = [item.get("event") for item in trace]
         if events.count("run_end") == 1 and events[-1] == "run_end":
             covered += 1
     return covered, len(data.results)
@@ -286,8 +292,8 @@ def _failed_text(failed: int, calls: int, rate: float | None) -> str:
 
 
 def _cell(text: Any) -> str:
-    """One Markdown table cell: no pipe or newline can break the table."""
-    return str(text).replace("|", "\\|").replace("\n", " ")
+    """One Markdown table cell: no pipe, newline or other line separator can break the table."""
+    return one_line(text).replace("|", "\\|")
 
 
 def _table(header: list[str], rows: list[list[Any]]) -> list[str]:
@@ -317,7 +323,7 @@ def _passes_table(passes: list[PassData]) -> list[str]:
         rows.append(
             [
                 data.pass_id,
-                m["model"],
+                md_safe(m["model"], 100),
                 m["enable_validation"],
                 m["enable_retry"],
                 m["fingerprint_short"],
@@ -346,7 +352,7 @@ def _groups_table(groups: list[PassGroup]) -> list[str]:
         rows.append(
             [
                 group_label(group),
-                group.model,
+                md_safe(group.model, 100),
                 m["passes"],
                 _success_text(m["successes"], m["tasks_done"], m["success_ci"]),
                 _failed_text(m["failed_tool_calls"], m["tool_calls"], m["failed_tool_call_rate"]),
@@ -407,7 +413,7 @@ def _model_table(rows: list[Comparison]) -> list[str]:
             body.append(
                 [
                     g["label"],
-                    g["model"],
+                    md_safe(g["model"], 100),
                     _success_text(g["successes"], g["tasks"], g["success_ci"]),
                     _failed_text(g["failed_calls"], g["tool_calls"], g["failed_rate"]),
                     *categories,
@@ -498,17 +504,18 @@ def write_block(doc_path: Path, block: str) -> None:
     """
     wrapped = f"{START_MARKER}\n{block}\n{END_MARKER}"
     if not doc_path.exists():
-        doc_path.parent.mkdir(parents=True, exist_ok=True)
-        doc_path.write_text(f"# Results\n\n{wrapped}\n", encoding="utf-8")
+        write_text_atomic(doc_path, f"# Results\n\n{wrapped}\n")
         return
-    text = doc_path.read_text(encoding="utf-8")
+    # WHY: read and write the exact bytes, so the text outside the markers stays byte for byte
+    # (AC10) and a file that cannot be read becomes a clean refusal, not a traceback.
+    text = read_text_exact(doc_path)
     if text.count(START_MARKER) != 1 or text.count(END_MARKER) != 1:
         raise ReportError(f"{doc_path.name} must contain exactly one start and one end marker")
     start = text.index(START_MARKER)
     end = text.index(END_MARKER)
     if end < start:
         raise ReportError(f"{doc_path.name}: the end marker comes before the start marker")
-    doc_path.write_text(text[:start] + wrapped + text[end + len(END_MARKER) :], encoding="utf-8")
+    write_text_atomic(doc_path, text[:start] + wrapped + text[end + len(END_MARKER) :])
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -528,10 +535,13 @@ def main(argv: list[str] | None = None) -> int:
         # WHY: a repeated id would count one pass twice and inflate every pooled number.
         if not ids or len(set(ids)) != len(ids):
             raise ReportError("--passes needs at least one pass id and no repeated ids")
+        # WHY: the output path is checked first, so a refused path costs nothing and never
+        # overwrites a file outside `docs/` (review finding 3).
+        write_path = checked_output_path(args.write) if args.write is not None else None
         passes = [load_pass(pass_id) for pass_id in ids]
         block = render_markdown(passes)
-        if args.write is not None:
-            write_block(args.write, block)
+        if write_path is not None:
+            write_block(write_path, block)
     except ReportError as error:
         print(f"refused: {error}", file=sys.stderr)
         return 2
