@@ -2,7 +2,7 @@
 
 **Spec:** docs/specs/tracing-and-first-runs.md
 **Branch:** feature/tracing-and-first-runs
-**Status:** Approved
+**Status:** Implemented
 
 ## Progress
 - [x] Step 1: Logger core (`src/logger.py`, `LOGS_DIR`, helpers moved from the gate)
@@ -14,7 +14,7 @@
 - [x] Step 7: Console: `EVENT_COLOURS` and `print_record`
 - [x] Step 8: CLI `python -m src.run`
 - [x] Step 9: Docs sync
-- [ ] Step 10: First real runs and `docs/plans/first-runs.md`
+- [x] Step 10: First real runs and `docs/plans/first-runs.md`
 - [x] Step 11: Critic sees the tool calls (added after runs R2 to R5)
 
 ## Overview
@@ -116,6 +116,7 @@ The spec's open questions are settled with the spec's own choices (running this 
   - Gaurav runs R1 to R5 from spec 5.7 with `python -m src.run "<task>"`, one at a time. Claude does not start real runs on its own, because each one uses the Ollama free-plan quota.
   - Claude reads each trace (`logs/<run_id>.jsonl`) and writes `first-runs.md`: run id, status, answer right or not (by eye), duration, counters, problems. Each problem is marked "fixed now" (small; fixed in this branch, and a test for it is added in `/test`) or "session 7". Also a note on whether the D6 rate-limit hints and the D18 limits looked right.
   - Check AC38 and AC39 with a short `read_trace` script over the 5 run ids.
+- **Note:** the five official runs were repeated after step 11 (the critic fix). The earlier runs are kept in `first-runs.md` as the "before" evidence.
 - **Why:** the roadmap requires 5 real runs that finish without hanging and leave readable traces; their problems guide session 7.
 - **Check:** the `read_trace` script: model `gpt-oss:120b-cloud` on every line, exactly one `run_end` as the last line, `duration_ms` under 15 minutes, no `GraphRecursionError`.
 - **Done when:** 5 traces pass the check and `first-runs.md` has the problems list. Wrong answers are allowed and written down honestly.
