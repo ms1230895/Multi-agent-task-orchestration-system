@@ -32,12 +32,18 @@ def record_html(record: Any) -> str:
     except Exception:  # noqa: BLE001 - see WHY above
         lines = [("(record could not be shown)", ERROR)]
 
-    parts = []
-    for text, colour in lines:
-        hex_colour = HTML_COLOURS.get(colour)
-        colour_css = f"color:{hex_colour};" if hex_colour else ""
-        parts.append(f'<div style="{colour_css}white-space:pre-wrap">{html.escape(text)}</div>')
-    return "".join(parts)
+    return "".join(line_html(text, colour) for text, colour in lines)
+
+
+def line_html(text: str, colour: str) -> str:
+    """Return one escaped line in a role colour (a rich colour name such as `green`).
+
+    WHY: the pages show the final answer in the same way as an event line, so both use this
+    one function. The text is escaped; the colour comes only from the `HTML_COLOURS` table.
+    """
+    hex_colour = HTML_COLOURS.get(colour)
+    colour_css = f"color:{hex_colour};" if hex_colour else ""
+    return f'<div style="{colour_css}white-space:pre-wrap">{html.escape(text)}</div>'
 
 
 def timeline_html(records: list[Any]) -> str:
