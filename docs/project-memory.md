@@ -30,3 +30,8 @@ Use it to start a roadmap session's spec. Type the slash command directly; don't
 /create-spec graph-planner-critic
 ```
 No extra description: the spec was built from the roadmap entry for session 3 and `docs/specs/architecture.md`. Use this short form when the roadmap already describes the session well. Model: opus, effort high.
+### 2026-10-16: Spec for session 4, executor
+```
+/create-spec executor
+```
+No extra description: built from the roadmap entry for session 4, `docs/specs/architecture.md`, and the session 3 code-review findings. Use this short form when the roadmap already describes the session well. Model: opus, effort high.
