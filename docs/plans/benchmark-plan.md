@@ -5,7 +5,7 @@
 **Status:** Approved
 
 ## Progress
-- [ ] Step 1: Package and text helpers (`benchmark/text.py`)
+- [x] Step 1: Package and text helpers (`benchmark/text.py`)
 - [ ] Step 2: Task schema and `load_tasks` (`benchmark/tasks.py`)
 - [ ] Step 3: Checkers (`benchmark/checkers.py`)
 - [ ] Step 4: The 30 tasks (`benchmark/tasks.json`)
