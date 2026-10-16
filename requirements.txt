@@ -6,6 +6,8 @@ pydantic>=2
 python-dotenv>=1.0
 ddgs
 rich>=13
+streamlit
+plotly
 
 # Development
 pytest>=8

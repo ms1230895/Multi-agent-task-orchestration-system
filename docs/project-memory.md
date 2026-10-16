@@ -41,6 +41,12 @@ python -m evaluation.analyze --pass main-on-1 --out docs/analysis/main-on-1.md
 ```
 Reads the pass results and their traces in `logs/`. Prints outcome classes, failed tool calls by tool and kind, repeated failing calls, critic rejections without a tool call, iteration-limit hits, and a short digest of every task that did not succeed. Read-only: no LLM calls. Exit code 0 done, 2 refused.
 
+### Start the web UI
+```bash
+python -m streamlit run ui/app.py
+```
+Three pages: Run a task (live), Trace explorer, Benchmark dashboard. Replay-only by default: the Run page appears only with `UI_ALLOW_LIVE_RUNS=true` in `.env`, and a run uses Ollama quota. Use `python -m`, not plain `streamlit run`, so `from src...` imports work.
+
 ## Claude Code commands
 <!-- slash commands and subagents, with one line each on what they do -->
 
@@ -120,3 +126,16 @@ No extra description: built from the roadmap entry for session 7, `docs/specs/ar
 I want to cap the whole test suite at 100 tests, to cut the tokens the test subagents use. [...] don't delete the test that has happened up until now, just add this now and from this point onward we will do tests in this specific way, do not delete any tests
 ```
 Result: the 837 existing tests are a frozen baseline; tests added after it are capped at 100 (budget = `pytest --collect-only -q` total minus 837). Hard rule 11 in CLAUDE.md; `test-writer`, `/test`, `test-runner` and `quality-reviewer` updated. Model: sonnet, effort medium.
+
+### 2026-10-17: Spec for session 8, streamlit-ui
+```
+/create-spec streamlit-ui
+```
+No extra description: built from the roadmap entry for session 8, `docs/specs/architecture.md`, `src/run.py` (`on_record`), `src/console.py` (role colours) and the evaluation tools. Key choices proposed: live runs in a background thread, replay-only mode by default (`UI_ALLOW_LIVE_RUNS`), UI settings kept out of `Settings`. Model: opus, effort high.
+
+### 2026-10-17: Test streamlit-ui, skip the review, ship it
+```
+lets gt pass review and just do this
+/git-feature
+```
+Said after `/test streamlit-ui` (18 new tests, 888 pass). Claude skipped `/code-review`, committed the tests and shipped the branch. Use only when you accept an unreviewed merge; the review can still be run later on `main`. Model: sonnet, effort medium.

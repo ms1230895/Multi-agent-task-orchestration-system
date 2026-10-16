@@ -21,6 +21,18 @@ RETRY = "dark_orange"  # also used for replans
 SUCCESS = "green"
 ERROR = "red"
 
+# WHY: a browser needs hex colours, not rich colour names. One hex per role constant, so the
+# UI never picks a colour itself. NOTE: mid-tone values, chosen to read on light and dark pages.
+HTML_COLOURS: dict[str, str] = {
+    PLANNER: "#c026d3",
+    EXECUTOR: "#0e9bb8",
+    CRITIC: "#ca8a04",
+    TOOL: "#3b82f6",
+    RETRY: "#ea580c",
+    SUCCESS: "#16a34a",
+    ERROR: "#dc2626",
+}
+
 # WHY: one shared Console, so all output goes through the same stream and settings.
 console = Console()
 
@@ -74,6 +86,29 @@ def print_record(record: dict[str, Any], *, out: Console = console) -> None:
     WHY: the CLI shows the run live from the same records the logger writes, so what you
     see is what is in the trace. Odd or unknown records print as plain lines and never raise.
     """
+    for text, colour in format_record(record):
+        _say(out, text, colour)
+
+
+def format_record(record: dict[str, Any]) -> list[tuple[str, str]]:
+    """Turn one trace record into its lines: `(text, rich colour name)` pairs.
+
+    Args:
+        record: a trace record `{ts, run_id, model, event, data}`.
+
+    Returns:
+        The lines in print order. The text is already passed through `sanitize`, but it is
+        not escaped for rich markup or HTML; the caller does that for its own output.
+
+    WHY: the terminal and the Streamlit UI must show the same words in the same colours, so
+    the rules live in this one function. Odd or unknown records give plain lines, never an error.
+    """
+    lines: list[tuple[str, str]] = []
+
+    def add(text: str, colour: str) -> None:
+        """Add one line, cleaned of control characters."""
+        lines.append((sanitize(text), colour))
+
     event = str(record.get("event", ""))
     data = record.get("data", {})
     if not isinstance(data, dict):
@@ -83,34 +118,32 @@ def print_record(record: dict[str, Any], *, out: Console = console) -> None:
     colour = EVENT_COLOURS.get(event, TOOL)
 
     if event == "plan_created":
-        _say(out, "Plan:", colour)
+        add("Plan:", colour)
         for number, step in enumerate(data.get("steps", []), start=1):
-            _say(out, f"  {number}. {step}", colour)
+            add(f"  {number}. {step}", colour)
     elif event == "replan":
-        _say(out, f"Replan #{data.get('replans')}: {data.get('reason', '')}", colour)
+        add(f"Replan #{data.get('replans')}: {data.get('reason', '')}", colour)
         for number, step in enumerate(data.get("steps", []), start=1):
-            _say(out, f"  {number}. {step}", colour)
+            add(f"  {number}. {step}", colour)
     elif event == "tool_call":
         ok = bool(data.get("ok"))
         detail = data.get("output") if ok else data.get("error")
-        _say(out, f"{data.get('tool')}({data.get('args')}) -> {detail}", colour if ok else ERROR)
+        add(f"{data.get('tool')}({data.get('args')}) -> {detail}", colour if ok else ERROR)
     elif event == "validation_error":
-        _say(out, f"invalid arguments for {data.get('tool')}: {data.get('errors')}", colour)
+        add(f"invalid arguments for {data.get('tool')}: {data.get('errors')}", colour)
     elif event == "retry":
-        _say(
-            out, f"retry ({data.get('kind')}) #{data.get('attempt')}: {data.get('reason')}", colour
-        )
+        add(f"retry ({data.get('kind')}) #{data.get('attempt')}: {data.get('reason')}", colour)
     elif event == "critic_verdict":
         step = data.get("step")
         number = step + 1 if isinstance(step, int) else "?"
-        _say(out, f"Step {number} output: {data.get('output')}", EXECUTOR)
-        _say(out, f"Critic: {data.get('verdict')}. {data.get('feedback')}", colour)
+        add(f"Step {number} output: {data.get('output')}", EXECUTOR)
+        add(f"Critic: {data.get('verdict')}. {data.get('feedback')}", colour)
     elif event == "run_end":
         done = data.get("status") == "done"
-        _say(
-            out,
+        add(
             f"Run {data.get('status')}. Counters: {data.get('counters')}",
             colour if done else ERROR,
         )
     else:
-        _say(out, f"{event}: {data}", colour)
+        add(f"{event}: {data}", colour)
+    return lines

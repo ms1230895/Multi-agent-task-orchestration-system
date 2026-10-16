@@ -190,3 +190,23 @@ One occurrence in 90 runs (`20261016-195950-972ae4`, `main-off-1`); the same tas
 - **S1** `fullmatch` for pass and run ids. **S4** the critic's "no tool needed" rule now covers only steps that reuse earlier results; a step that asks for new data still needs a successful call in the log. **S5** a real backslash in a tool result is doubled in the log, so it cannot be read as a line break (D45).
 
 **Deferred (not fixed, decide later):** Warning 6 (`analyze_pass` is about 90 lines: split it); S2 (size and depth limits on result and trace files, caps on digest lists); S3 (`data_block` neutralises only its own tag; wrap each earlier result separately); S6 (import `CATEGORY_ORDER` from the runner, move the markers to the top of `report.py`, merge the repeated category helper); S7 (rename the "passes" and "count" columns); S8 (a "too few failed calls" note when counts are below about 5); S9 (the digest prints a 0-based step); S10 (guard `wilson_interval` against `successes > total` and a non-finite duration).
+
+
+## Session 8: streamlit-ui (2026-10-17)
+
+### D47. Live runs happen in a background thread
+`ui/live.py` `RunManager` runs `run_task` in a daemon thread, one run at a time per server process (`st.cache_resource`); the page polls `snapshot()` once a second with `st.fragment(run_every=1)`. **Why:** Streamlit runs the page script again on every click and stops the old run with an exception that `run_task` does not catch, so a run inside the page script would end halfway with no `run_end`. In its own thread the run goes on. The thread only appends records under a lock and never calls Streamlit. **Cost:** a run cannot be stopped from the UI; it ends through the hard limits (Hard rule 5). A hot reload during development can create a second manager, so restart the app before a real run.
+
+### D48. UI settings stay out of `Settings`
+`UiSettings` (`allow_live_runs`, `model_choices`) is a separate model in `src/config.py`. **Why:** `Settings.model_dump()` is `run_end.config` and the pass manifest's `config`. A new field there would make new passes look different from the baseline passes, and the report would refuse to compare them (D43). `Settings` still has exactly 9 fields.
+
+### D49. Replay-only is the default
+`UI_ALLOW_LIVE_RUNS` defaults to `false`; in that mode the Run page is not in the page list and its module is not imported. **Why:** a copy of the app hosted somewhere can then never spend Ollama quota or run tools. The Run page checks the mode again itself (defence in depth). **Open for session 9:** `logs/` is gitignored, so a hosted copy would show the dashboard but no traces; decide which sample traces to ship.
+
+### D50. The dashboard hides small passes by default
+The pass selector selects only the passes with the largest task list, so a 3-task smoke pass (`smoke-2`, 100%) does not sit beside the 30-task passes. It is one click away. `success_chart` still draws every complete pass it is given (AC14).
+
+### Notes from the build
+- `pages_for(live)` returns plain `PageSpec` records, not `st.Page`: `st.Page.title` fails outside a running Streamlit app, and a test needs to read the page list.
+- The dashboard imports the private `_reduction_text` from `evaluation/report.py` so the page and `docs/results.md` use the same wording (as in D42). A rename fails the dashboard loudly.
+- UI runs write normal traces to `logs/`, so the traced-run count includes them (107 after the first two UI runs).
