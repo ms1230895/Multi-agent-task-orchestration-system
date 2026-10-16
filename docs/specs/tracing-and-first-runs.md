@@ -1,6 +1,6 @@
 # Spec: Tracing and first runs
 
-**Status:** Draft
+**Status:** Approved
 **Branch:** feature/tracing-and-first-runs
 **Date:** 2026-10-16
 
