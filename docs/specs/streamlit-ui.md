@@ -1,6 +1,6 @@
 # Spec: Streamlit UI
 
-**Status:** Draft
+**Status:** Approved
 **Branch:** feature/streamlit-ui
 **Date:** 2026-10-17
 
