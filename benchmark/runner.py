@@ -7,6 +7,7 @@ resumed later. See `docs/specs/benchmark.md` for the full design.
 Terminal use: `python -m benchmark.runner --pass <pass_id>`.
 """
 
+import argparse
 import hashlib
 import json
 import re
@@ -20,8 +21,15 @@ from typing import Any, Literal
 from rich.markup import escape
 
 from benchmark.checkers import CheckResult, run_checks
-from benchmark.tasks import TASKS_PATH, BenchmarkTask, load_tasks
-from src.config import MAX_PLAN_STEPS, PROJECT_ROOT, WORKSPACE_DIR, Settings, get_settings
+from benchmark.tasks import TASKS_PATH, BenchmarkTask, TasksFileError, load_tasks
+from src.config import (
+    MAX_PLAN_STEPS,
+    PROJECT_ROOT,
+    WORKSPACE_DIR,
+    ConfigError,
+    Settings,
+    get_settings,
+)
 from src.console import ERROR, RETRY, SUCCESS, console, print_record, sanitize
 from src.logger import trim
 from src.run import run_task
@@ -582,4 +590,167 @@ def run_pass(
         finished += 1
         _say(_progress_text(finished, len(planned), line), SUCCESS if line["success"] else ERROR)
 
+    _print_summary(pass_id, _load_summary(pass_dir, planned_count=len(planned)))
     return "complete"
+
+
+CATEGORY_ORDER = ("calc", "search", "file", "multi-tool")
+
+
+def _count_int(counters: Any, key: str) -> int:
+    """Read one counter as an int; anything else counts as 0."""
+    value = counters.get(key, 0) if isinstance(counters, dict) else 0
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+def summarize(
+    results: list[dict[str, Any]], *, planned: int | None = None, infra_pauses: int = 0
+) -> dict[str, Any]:
+    """Summarise the result lines of one pass, with the metric definitions of architecture 5.
+
+    Args:
+        results: the lines of `results.jsonl`.
+        planned: how many tasks the pass has in its manifest.
+        infra_pauses: lines in `paused.jsonl`.
+
+    Returns:
+        `success_rate` = successes / results; `failed_tool_call_rate` = failed tool calls /
+        tool calls, summed from the run counters. A rate is `None` when its denominator is 0.
+        `crashed` counts results with a non-empty `error`.
+
+    WHY: session 7 compares passes with exactly these numbers, so they are defined once.
+    """
+    successes = sum(1 for record in results if record.get("success") is True)
+    by_category: dict[str, dict[str, int]] = {}
+    for record in results:
+        category = str(record.get("category", "unknown"))
+        entry = by_category.setdefault(category, {"successes": 0, "tasks": 0})
+        entry["tasks"] += 1
+        if record.get("success") is True:
+            entry["successes"] += 1
+    tool_calls = sum(_count_int(record.get("counters"), "tool_calls") for record in results)
+    failed_calls = sum(
+        _count_int(record.get("counters"), "failed_tool_calls") for record in results
+    )
+    return {
+        "tasks_done": len(results),
+        "tasks_planned": planned,
+        "successes": successes,
+        "success_rate": successes / len(results) if results else None,
+        "by_category": by_category,
+        "tool_calls": tool_calls,
+        "failed_tool_calls": failed_calls,
+        "failed_tool_call_rate": failed_calls / tool_calls if tool_calls else None,
+        "infra_pauses": infra_pauses,
+        "crashed": sum(1 for record in results if record.get("error")),
+    }
+
+
+def _load_summary(pass_dir: Path, *, planned_count: int | None) -> dict[str, Any]:
+    """Read a pass folder and summarise it. Runs nothing and calls no LLM."""
+    results = _read_results(pass_dir / RESULTS_NAME)
+    paused_path = pass_dir / PAUSED_NAME
+    pauses = 0
+    if paused_path.exists():
+        pauses = sum(
+            1 for line in paused_path.read_text(encoding="utf-8").split("\n") if line.strip()
+        )
+    return summarize(results, planned=planned_count, infra_pauses=pauses)
+
+
+def _percent(rate: float | None) -> str:
+    """Write a rate as a percentage, or `n/a` when it has no denominator."""
+    return "n/a" if rate is None else f"{rate:.1%}"
+
+
+def _print_summary(pass_id: str, summary: dict[str, Any]) -> None:
+    """Print the summary of a pass in the terminal."""
+    planned = summary["tasks_planned"]
+    done = (
+        f"{summary['tasks_done']}/{planned}" if planned is not None else str(summary["tasks_done"])
+    )
+    _say(f"Summary of pass {pass_id}")
+    _say(f"  tasks done: {done}")
+    _say(
+        f"  success: {summary['successes']}/{summary['tasks_done']} "
+        f"({_percent(summary['success_rate'])})"
+    )
+    for category in CATEGORY_ORDER:
+        entry = summary["by_category"].get(category)
+        if entry:
+            _say(f"    {category}: {entry['successes']}/{entry['tasks']}")
+    _say(
+        f"  tool calls: {summary['tool_calls']}, failed: {summary['failed_tool_calls']} "
+        f"({_percent(summary['failed_tool_call_rate'])})"
+    )
+    _say(f"  paused by infrastructure errors: {summary['infra_pauses']}")
+    _say(f"  runs that crashed: {summary['crashed']}")
+
+
+def _summary_command(pass_id: str) -> int:
+    """`--summary`: print the summary of an existing pass without running anything."""
+    _check_pass_id(pass_id)
+    pass_dir = RESULTS_DIR / pass_id
+    if not (pass_dir / MANIFEST_NAME).exists():
+        _say(f"no such pass: {pass_id}", ERROR)
+        return 2
+    manifest = _read_manifest(pass_dir / MANIFEST_NAME)
+    planned = len(manifest["task_ids"]) if isinstance(manifest["task_ids"], list) else None
+    _print_summary(pass_id, _load_summary(pass_dir, planned_count=planned))
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Command line entry: run, resume, or summarise a pass.
+
+    Args:
+        argv: the arguments after the program name. Default: `sys.argv[1:]`.
+
+    Returns:
+        0 pass complete (or summary printed), 2 refused or invalid, 3 paused by an
+        infrastructure error, 130 interrupted with Ctrl-C.
+    """
+    parser = argparse.ArgumentParser(
+        prog="python -m benchmark.runner",
+        description="Run, resume or summarise a benchmark pass.",
+    )
+    parser.add_argument("--pass", dest="pass_id", required=True, help="the pass name (a folder)")
+    parser.add_argument(
+        "--tasks", help="comma-separated task ids for a new pass, e.g. calc-01,file-02"
+    )
+    parser.add_argument("--verbose", action="store_true", help="show every trace event live")
+    parser.add_argument(
+        "--summary", action="store_true", help="print the summary of an existing pass and stop"
+    )
+    args = parser.parse_args(argv)
+
+    task_ids: list[str] | None = None
+    if args.tasks is not None:
+        task_ids = [part.strip() for part in args.tasks.split(",") if part.strip()]
+        if not task_ids:
+            parser.error("--tasks needs at least one task id")
+
+    # WHY: a setup mistake needs a short message, not a traceback. `ConfigError` and
+    # `TasksFileError` come before any LLM call; `PassRefused` means a mixed pass was blocked.
+    try:
+        if args.summary:
+            return _summary_command(args.pass_id)
+        outcome = run_pass(
+            args.pass_id, task_ids=task_ids, verbose=args.verbose, results_root=RESULTS_DIR
+        )
+    except (ConfigError, TasksFileError, PassRefused) as exc:
+        _say(f"refused: {exc}", ERROR)
+        return 2
+    except KeyboardInterrupt:
+        # WHY: finished tasks are already on disk; the interrupted task has no `run_end`, so it
+        # is not counted, and resume runs it again.
+        _say(
+            f"interrupted. Resume later with: python -m benchmark.runner --pass {args.pass_id}",
+            RETRY,
+        )
+        return 130
+    return 0 if outcome == "complete" else 3
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
