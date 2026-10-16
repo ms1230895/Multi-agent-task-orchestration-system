@@ -10,7 +10,7 @@
 - [x] Step 3: Console (`src/console.py`)
 - [x] Step 4: Tool result base (`src/tools/base.py`)
 - [x] Step 5: Calculator
-- [ ] Step 6: File tools
+- [x] Step 6: File tools
 - [ ] Step 7: Web search
 - [ ] Step 8: Tool registry
 - [ ] Step 9: Validation gate (`src/validation.py`)
