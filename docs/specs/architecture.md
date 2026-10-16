@@ -14,10 +14,11 @@ Plain Python code (the **router**) reads the critic's verdict and decides what h
 
 ## 2. Layers
 
-The system has 8 layers, plus 2 cross-cutting pieces used by every layer. Each layer only depends on the layers below it.
+The system has 9 layers, plus 2 cross-cutting pieces used by every layer. Each layer only depends on the layers below it.
 
 | # | Layer | Lives in | Job |
 |---|---|---|---|
+| 9 | Interface | `ui/` | Streamlit app: runs a task live, replays traces, charts the results. Displays only; no agent logic (section 2.8) |
 | 8 | Evaluation | `evaluation/` | Read-only: compares passes, counts traced runs, groups failures from traces (section 5) |
 | 7 | Benchmark | `benchmark/` | Runs 30 fixed tasks, checks answers with code, reports metrics |
 | 6 | Entry point | `src/run.py` | `run_task(task)`: builds the graph, runs it, returns the final state |
@@ -172,6 +173,16 @@ On a replan, `advance` only increments `replans`. The planner then reads the old
 - `benchmark/runner.py`: runs tasks through `run_task`, applies checks, saves results (see section 5).
 - `workspace/` is emptied before each task and then filled with the task's `setup_files`, so tasks cannot affect each other.
 
+### 2.8 Interface (session 8)
+`python -m streamlit run ui/app.py`. A Streamlit app in `ui/`, outside the code fingerprint. It shows what lower layers produce and holds no agent logic. Full design: `docs/specs/streamlit-ui.md`.
+
+- **Pages:** *Run a task* (live; model selector, validation and retry toggles, colour-coded timeline), *Trace explorer* (replay any trace in `logs/`, step through events), *Benchmark dashboard* (Plotly charts of the passes in `benchmark/results/`, built from the `evaluation/` code so the numbers equal `docs/results.md`).
+- **Two modes.** Replay-only is the default: the Run page is not in the page list and its module is not imported, so there is no code path to `run_task`. Live mode needs `UI_ALLOW_LIVE_RUNS=true` and valid main settings.
+- **Live runs** go through `RunManager` (`ui/live.py`): `run_task` runs in a background thread, one run at a time per server process, and the page polls its collected records once a second (D47). The thread never calls Streamlit.
+- **Same words and colours as the terminal:** `src/console.py` has `format_record` (the lines and rich colour of a record) and `HTML_COLOURS`. `print_record` and `ui/render.py` both use `format_record`.
+- **Untrusted text:** trace text is HTML-escaped (`ui/render.py`) and shown with `st.html`, which does no Markdown. Task, answer and config are shown with `st.text` and `st.json`.
+- **Settings:** `UiSettings` in `src/config.py` (`allow_live_runs`, `model_choices`), kept out of `Settings` so `run_end.config` and the pass manifests keep their shape (D48). The page can change only the model (from `OLLAMA_MODEL` and `OLLAMA_MODEL_ALT`) and the two gate flags; every limit comes from `.env`.
+
 ## 3. Configuration (`.env` through `src/config.py`)
 
 | Variable | Default | Purpose |
@@ -185,6 +196,8 @@ On a replan, `advance` only increments `replans`. The planner then reads the old
 | `MAX_REPLANS` | `1` | Replans per run |
 | `MAX_TOOL_ITERATIONS` | `5` | Executor inner loop rounds per step |
 | `TOOL_RETRY_ATTEMPTS` | `2` | Extra attempts per transient tool failure |
+| `OLLAMA_MODEL_ALT` | (none) | Second model offered by the UI model selector. Read into `UiSettings`, not `Settings` |
+| `UI_ALLOW_LIVE_RUNS` | `false` | `true` shows the UI Run page (starts real LLM runs). Read into `UiSettings`, not `Settings` |
 
 `config.py` validates these with Pydantic at start-up and stops with a clear message if one is missing or invalid. It never prints the values of secrets (Hard rule 7).
 

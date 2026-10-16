@@ -41,6 +41,12 @@ python -m evaluation.analyze --pass main-on-1 --out docs/analysis/main-on-1.md
 ```
 Reads the pass results and their traces in `logs/`. Prints outcome classes, failed tool calls by tool and kind, repeated failing calls, critic rejections without a tool call, iteration-limit hits, and a short digest of every task that did not succeed. Read-only: no LLM calls. Exit code 0 done, 2 refused.
 
+### Start the web UI
+```bash
+python -m streamlit run ui/app.py
+```
+Three pages: Run a task (live), Trace explorer, Benchmark dashboard. Replay-only by default: the Run page appears only with `UI_ALLOW_LIVE_RUNS=true` in `.env`, and a run uses Ollama quota. Use `python -m`, not plain `streamlit run`, so `from src...` imports work.
+
 ## Claude Code commands
 <!-- slash commands and subagents, with one line each on what they do -->
 

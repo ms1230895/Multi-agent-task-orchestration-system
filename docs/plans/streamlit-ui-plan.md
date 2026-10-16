@@ -2,7 +2,7 @@
 
 **Spec:** docs/specs/streamlit-ui.md
 **Branch:** feature/streamlit-ui
-**Status:** Approved
+**Status:** Implemented
 
 ## Progress
 - [x] Step 1: dependencies, Streamlit config, and a feasibility check
@@ -12,9 +12,9 @@
 - [x] Step 5: `ui/live.py` (`RunManager`, `live_settings`)
 - [x] Step 6: `ui/data.py` (traces and passes from disk)
 - [x] Step 7: `ui/charts.py` (three Plotly figures)
-- [ ] Step 8: `ui/app.py`, trace explorer and dashboard pages (replay-only works)
-- [ ] Step 9: the Run page (live mode)
-- [ ] Step 10: docs and decisions
+- [x] Step 8: `ui/app.py`, trace explorer and dashboard pages (replay-only works)
+- [x] Step 9: the Run page (live mode)
+- [x] Step 10: docs and decisions
 
 ## Overview
 Build from the bottom up: first the two small `src/` changes, then the four plain-Python helper modules in `ui/` (no Streamlit import, so each one can be checked in the terminal), then the thin Streamlit pages on top. Replay-only mode works first (Step 8), so the safe mode exists before any code path can start a live run (Step 9).
