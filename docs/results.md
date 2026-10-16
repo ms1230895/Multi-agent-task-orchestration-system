@@ -1,6 +1,6 @@
 # Results
 
-**Status: baseline only (before any fix).** The generated block at the bottom is regenerated with `python -m evaluation.report`. Do not edit it by hand. Final headline numbers come from the post-fix passes and are added in Step 12.
+**Status: baseline only (before any fix).** The post-fix passes (`main-on-2`, `main-off-2`, `second-on-2`) were **not run**, so the effect of the two fixes (D44, D45) and of the review fixes (D46) is **not measured**. The generated block at the bottom is regenerated with `python -m evaluation.report`. Do not edit it by hand. To measure the fixes later: run the three passes with the same `.env` as the baseline and add them to the report command.
 
 ## Setup (baseline)
 - Models: main `gpt-oss:120b-cloud`, second `gemma4:31b-cloud`. Passes: `main-off-1` (gate off), `main-on-1` (gate on), `second-on-1` (gate on).

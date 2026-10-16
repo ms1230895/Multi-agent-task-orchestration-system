@@ -2,7 +2,7 @@
 
 **Spec:** docs/specs/evaluation.md
 **Branch:** feature/evaluation
-**Status:** Approved
+**Status:** Implemented (Steps 11 and 12 skipped by Gaurav's decision, 2026-10-17)
 
 ## Progress
 Part A: build the tools, run the baseline, choose the fixes
@@ -18,8 +18,8 @@ Part A: build the tools, run the baseline, choose the fixes
 - [x] Step 10: the fixes (up to 3, one commit each)
 
 Part B: runs after `/test` and `/code-review` (the measured code must be the merged code)
-- [ ] Step 11: post-fix passes
-- [ ] Step 12: `docs/results.md` and final numbers
+- [ ] Step 11: post-fix passes (SKIPPED: not run)
+- [ ] Step 12: `docs/results.md` and final numbers (SKIPPED: baseline numbers only)
 
 ## Overview
 First build two read-only tools in a new `evaluation/` folder (outside the code fingerprint, so the baseline passes can run while we build). Then run the baseline passes, use `analyze` on their traces to name the top 3 failure causes, get Gaurav's approval of the fixes in a spec addendum, make the fixes in `src/`, and after test and review run fresh passes. The numbers in `docs/results.md` come from the report tool, never from hand-copying.
