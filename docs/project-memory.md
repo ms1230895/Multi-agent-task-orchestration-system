@@ -132,3 +132,10 @@ Result: the 837 existing tests are a frozen baseline; tests added after it are c
 /create-spec streamlit-ui
 ```
 No extra description: built from the roadmap entry for session 8, `docs/specs/architecture.md`, `src/run.py` (`on_record`), `src/console.py` (role colours) and the evaluation tools. Key choices proposed: live runs in a background thread, replay-only mode by default (`UI_ALLOW_LIVE_RUNS`), UI settings kept out of `Settings`. Model: opus, effort high.
+
+### 2026-10-17: Test streamlit-ui, skip the review, ship it
+```
+lets gt pass review and just do this
+/git-feature
+```
+Said after `/test streamlit-ui` (18 new tests, 888 pass). Claude skipped `/code-review`, committed the tests and shipped the branch. Use only when you accept an unreviewed merge; the review can still be run later on `main`. Model: sonnet, effort medium.
