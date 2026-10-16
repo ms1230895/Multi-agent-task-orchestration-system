@@ -8,7 +8,7 @@
 - [x] Step 1: dependencies, Streamlit config, and a feasibility check
 - [x] Step 2: `UiSettings` in `src/config.py`
 - [x] Step 3: `format_record` and `HTML_COLOURS` in `src/console.py`
-- [ ] Step 4: `ui/render.py` (safe HTML timeline)
+- [x] Step 4: `ui/render.py` (safe HTML timeline)
 - [ ] Step 5: `ui/live.py` (`RunManager`, `live_settings`)
 - [ ] Step 6: `ui/data.py` (traces and passes from disk)
 - [ ] Step 7: `ui/charts.py` (three Plotly figures)
