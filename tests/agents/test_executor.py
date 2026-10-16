@@ -13,6 +13,7 @@ import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 
 import src.agents.executor as executor_module
+from src import config
 from src.agents.executor import (
     EMPTY_REPLY_OUTPUT,
     ITERATION_LIMIT_OUTPUT,
@@ -22,6 +23,7 @@ from src.agents.executor import (
     run_executor,
 )
 from src.config import Settings, load_settings
+from src.logger import EventCallback
 from src.state import AgentState
 from src.tools.base import ToolResult, failure, success
 from src.tools.definitions import tool_definitions
@@ -409,3 +411,189 @@ def test_ac22_run_executor_real_gate_and_calculator_return_1024_to_the_llm() -> 
     assert len(answers) == 1
     assert answers[0].content == "1024"
     assert result["last_output"] == "1024"
+
+
+# ---- Session 5: events (AC14, AC15, AC16 of the tracing spec) ----
+
+
+def _collector() -> tuple[list[tuple[str, dict[str, Any]]], EventCallback]:
+    """Return a list and a callback that appends every event to it."""
+    events: list[tuple[str, dict[str, Any]]] = []
+
+    def collect(event: str, data: dict[str, Any]) -> None:
+        events.append((event, data))
+
+    return events, collect
+
+
+def _broken_callback(event: str, data: dict[str, Any]) -> None:
+    """A callback that always raises."""
+    raise RuntimeError("callback crashed")
+
+
+def test_trace_ac14_run_executor_real_calculator_emits_one_tool_call_event() -> None:
+    events, collect = _collector()
+    call = _call("calculator", {"expression": "2 ** 10"}, "c1")
+    llm = RecordingFakeLLM(executor_replies=[_tool_reply(call), AIMessage("1024")])
+    run_executor(_state(), llm=llm, settings=S, on_event=collect)
+    # WHY: the executor must pass on_event to the gate, or no tool call ever reaches the trace.
+    assert [name for name, _ in events] == ["tool_call"]
+    data = events[0][1]
+    assert data["tool"] == "calculator"
+    assert data["ok"] is True
+    assert data["output"] == "1024"
+
+
+def test_trace_ac15_run_executor_invalid_args_emit_validation_error_then_failed_tool_call() -> None:
+    events, collect = _collector()
+    call = _call("calculator", {"expr": "1"}, "c1")
+    llm = RecordingFakeLLM(executor_replies=[_tool_reply(call), AIMessage("sorry")])
+    settings = _settings(ENABLE_VALIDATION="true")
+    run_executor(_state(), llm=llm, settings=settings, on_event=collect)
+    # WHY: the failed-tool-call rate in the CV number is counted from exactly these two events.
+    assert [name for name, _ in events] == ["validation_error", "tool_call"]
+    assert events[1][1]["ok"] is False
+
+
+def test_trace_ac16_run_executor_raising_callback_does_not_change_the_result() -> None:
+    call = _call("calculator", {"expression": "2 ** 10"}, "c1")
+
+    def make_llm() -> RecordingFakeLLM:
+        return RecordingFakeLLM(executor_replies=[_tool_reply(call), AIMessage("1024")])
+
+    plain = run_executor(_state(), llm=make_llm(), settings=S)
+    broken = run_executor(_state(), llm=make_llm(), settings=S, on_event=_broken_callback)
+    # WHY: a broken display must never change the executor output or the tool log.
+    assert broken == plain
+
+
+def test_trace_ac16_run_executor_passes_on_event_to_call_tool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[Any] = []
+
+    def recording_call_tool(
+        name: Any, args: Any, *, settings: Settings | None = None, on_event: Any = None
+    ) -> ToolResult:
+        seen.append(on_event)
+        return success("ok")
+
+    monkeypatch.setattr(executor_module, "call_tool", recording_call_tool)
+    _, collect = _collector()
+    llm = RecordingFakeLLM(executor_replies=[_tool_reply(_calc("c1")), AIMessage("done")])
+    run_executor(_state(), llm=llm, settings=S, on_event=collect)
+    # WHY: the executor emits nothing itself; passing the callback on is its whole job here.
+    assert seen == [collect]
+
+
+# ---- Session 5.8: the tool log for the critic (AC43, AC44) ----
+
+
+@pytest.fixture
+def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A temporary workspace that `config.WORKSPACE_DIR` points at."""
+    # WHY: the real write_file must never touch the project's real workspace/ folder.
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    monkeypatch.setattr(config, "WORKSPACE_DIR", ws)
+    return ws
+
+
+def test_ac43_run_executor_returns_exactly_last_output_and_last_tools() -> None:
+    llm = RecordingFakeLLM(executor_replies=[AIMessage("42")])
+    # WHY: this is the contract the graph and the critic rely on.
+    assert set(run_executor(_state(), llm=llm, settings=S)) == {"last_output", "last_tools"}
+
+
+def test_ac43_run_executor_write_file_call_is_logged_as_one_ok_line(workspace: Path) -> None:
+    call = _call("write_file", {"path": "hello.txt", "content": "hi"}, "c1")
+    llm = RecordingFakeLLM(executor_replies=[_tool_reply(call), AIMessage("written")])
+    result = run_executor(_state(), llm=llm, settings=S)
+    lines = result["last_tools"].splitlines()
+    # WHY: the critic needs this line as proof the file was really written (run R3).
+    assert len(lines) == 1
+    assert lines[0].startswith("write_file(")
+    assert "hello.txt" in lines[0]
+    assert "-> ok: " in lines[0]
+    assert (workspace / "hello.txt").read_text(encoding="utf-8") == "hi"
+
+
+def test_ac43_run_executor_failed_call_is_logged_with_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_spy(monkeypatch, CallToolSpy([failure("bad expression")]))
+    llm = RecordingFakeLLM(executor_replies=[_tool_reply(_calc("c1")), AIMessage("sorry")])
+    result = run_executor(_state(), llm=llm, settings=S)
+    # WHY: the critic must be able to see that a tool call failed.
+    assert result["last_tools"] == 'calculator({"expression": "6*7"}) -> error: bad expression'
+
+
+def test_ac43_run_executor_no_calls_gives_no_tools_called_text() -> None:
+    llm = RecordingFakeLLM(executor_replies=[AIMessage("42")])
+    result = run_executor(_state(), llm=llm, settings=S)
+    # WHY: "no tool was needed" must be told apart from "the log is missing".
+    assert result["last_tools"] == "(no tools called)"
+
+
+def test_ac43_run_executor_invalid_tool_call_is_logged_with_raw_args(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_spy(monkeypatch, CallToolSpy([failure("invalid arguments")]))
+    broken = AIMessage(
+        content="",
+        invalid_tool_calls=[
+            {
+                "name": "calculator",
+                "args": '{"expression": ',
+                "id": "bad1",
+                "error": "x",
+                "type": "invalid_tool_call",
+            }
+        ],
+    )
+    llm = RecordingFakeLLM(executor_replies=[broken, AIMessage("done")])
+    result = run_executor(_state(), llm=llm, settings=S)
+    # WHY: raw string arguments must not crash the log builder.
+    assert result["last_tools"] == 'calculator({"expression": ) -> error: invalid arguments'
+
+
+def test_ac43_run_executor_long_arguments_and_outcome_are_cut_to_150_chars_each(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_spy(monkeypatch, CallToolSpy([success("o" * 400)]))
+    call = _call("calculator", {"expression": "e" * 400}, "c1")
+    llm = RecordingFakeLLM(executor_replies=[_tool_reply(call), AIMessage("done")])
+    result = run_executor(_state(), llm=llm, settings=S)
+    line = result["last_tools"]
+    # WHY: one huge argument or result must not fill the critic prompt.
+    assert "e" * 151 not in line
+    assert "o" * 151 not in line
+    assert line.count("…") == 2
+
+
+def test_ac44_run_executor_seven_calls_give_seven_lines_and_last_two_are_skipped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_spy(monkeypatch, CallToolSpy())
+    calls = [_calc(f"c{i}", f"{i}+1") for i in range(7)]
+    llm = RecordingFakeLLM(executor_replies=[_tool_reply(*calls), AIMessage("done")])
+    lines = run_executor(_state(), llm=llm, settings=S)["last_tools"].splitlines()
+    # WHY: the critic must see that two calls were never run, not believe they worked.
+    assert len(lines) == 7
+    assert all(line.endswith("-> ok: ok") for line in lines[:5])
+    assert all(line.endswith("-> skipped") for line in lines[5:])
+
+
+def test_ac44_run_executor_log_over_1500_chars_is_cut_and_iteration_limit_result_has_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_spy(monkeypatch, CallToolSpy([success("r" * 140)]))
+    five_calls = [_calc(f"c{i}") for i in range(5)]
+    # WHY: the script repeats its last reply, so this LLM asks for tools until the limit.
+    llm = RecordingFakeLLM(executor_replies=[_tool_reply(*five_calls)])
+    result = run_executor(_state(), llm=llm, settings=_settings(MAX_TOOL_ITERATIONS="3"))
+    # WHY: the log must stay under the cap, and a run that hit the limit must still show it.
+    assert result["last_output"].startswith(ITERATION_LIMIT_OUTPUT)
+    assert result["last_tools"].startswith("calculator(")
+    assert len(result["last_tools"]) == 1500
+    assert result["last_tools"].endswith("…")

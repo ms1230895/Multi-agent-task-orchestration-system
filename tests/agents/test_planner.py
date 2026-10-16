@@ -1,12 +1,14 @@
 """Tests for `src/agents/planner.py`: Plan and `run_planner` with a fake LLM (AC6, AC8-AC13)."""
 
 import json
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
 
 from src.agents.planner import Plan, run_planner
 from src.config import MAX_PLAN_STEPS
+from src.logger import EventCallback, trim
 from src.tools import TOOLS
 from tests.fakes import RecordingFakeLLM, make_state, prompt_text
 
@@ -187,3 +189,92 @@ def test_ac25_run_planner_replan_without_feedback_has_no_feedback_block() -> Non
     user = str(llm.calls[0][1].content)
     assert "<feedback>" not in user
     assert "(none)" in user
+
+
+# ---- Session 5: events (AC10, AC11, AC16) and last_tools (AC47) ----
+
+
+def _collector() -> tuple[list[tuple[str, dict[str, Any]]], EventCallback]:
+    """Return a list and a callback that appends every event to it."""
+    events: list[tuple[str, dict[str, Any]]] = []
+
+    def collect(event: str, data: dict[str, Any]) -> None:
+        events.append((event, data))
+
+    return events, collect
+
+
+def _broken_callback(event: str, data: dict[str, Any]) -> None:
+    """A callback that always raises."""
+    raise RuntimeError("callback crashed")
+
+
+def test_ac10_run_planner_first_valid_plan_emits_one_plan_created() -> None:
+    events, collect = _collector()
+    run_planner(make_state(), llm=RecordingFakeLLM(planner_replies=[VALID]), on_event=collect)
+    # WHY: the trace must show the first plan exactly once, with its steps.
+    assert events == [("plan_created", {"steps": ["first", "second"]})]
+
+
+def test_ac10_run_planner_plan_valid_after_reask_still_emits_one_plan_created() -> None:
+    events, collect = _collector()
+    llm = RecordingFakeLLM(planner_replies=[INVALID, VALID])
+    run_planner(make_state(), llm=llm, on_event=collect)
+    # WHY: the re-ask is an internal detail; one valid plan is one event.
+    assert [name for name, _ in events] == ["plan_created"]
+
+
+def test_ac10_run_planner_two_invalid_replies_emit_nothing() -> None:
+    events, collect = _collector()
+    llm = RecordingFakeLLM(planner_replies=[INVALID, "not json"])
+    run_planner(make_state(), llm=llm, on_event=collect)
+    # WHY: a failed plan has no steps to show; run_end reports the failure.
+    assert events == []
+
+
+def test_ac11_run_planner_replan_emits_one_replan_with_reason_and_no_plan_created() -> None:
+    events, collect = _collector()
+    state = make_state(replans=1, plan=["old"], feedback="f" * 700)
+    run_planner(state, llm=RecordingFakeLLM(planner_replies=[VALID]), on_event=collect)
+    # WHY: a replan is a different event from the first plan and must record why it happened.
+    assert [name for name, _ in events] == ["replan"]
+    data = events[0][1]
+    assert data["replans"] == 1
+    assert data["steps"] == ["first", "second"]
+    assert data["reason"] == trim("f" * 700, 500)
+    assert len(data["reason"]) == 500
+
+
+def test_ac11_run_planner_replan_that_fails_emits_nothing() -> None:
+    events, collect = _collector()
+    state = make_state(replans=1, plan=["old"], feedback="fb")
+    run_planner(state, llm=RecordingFakeLLM(planner_replies=[INVALID, INVALID]), on_event=collect)
+    # WHY: only a valid new plan is a replan event.
+    assert events == []
+
+
+def test_ac16_run_planner_raising_callback_does_not_change_the_result() -> None:
+    plain = run_planner(make_state(), llm=RecordingFakeLLM(planner_replies=[VALID]))
+    broken = run_planner(
+        make_state(), llm=RecordingFakeLLM(planner_replies=[VALID]), on_event=_broken_callback
+    )
+    # WHY: a broken display must never change what the planner returns.
+    assert broken == plain
+
+
+def test_ac16_run_planner_raising_callback_on_replan_does_not_change_the_result() -> None:
+    state = make_state(replans=1, plan=["old"], feedback="fb")
+    plain = run_planner(state, llm=RecordingFakeLLM(planner_replies=[VALID]))
+    broken = run_planner(
+        state, llm=RecordingFakeLLM(planner_replies=[VALID]), on_event=_broken_callback
+    )
+    # WHY: the replan path has its own emit call; it must be just as safe.
+    assert broken == plain
+
+
+def test_ac47_run_planner_replan_clears_last_tools_and_last_output() -> None:
+    state = make_state(replans=1, plan=["old"], last_output="old out", last_tools="old tools")
+    result = run_planner(state, llm=RecordingFakeLLM(planner_replies=[VALID]))
+    # WHY: a tool log from the old plan must not be shown to the critic for the new plan.
+    assert result["last_tools"] == ""
+    assert result["last_output"] == ""

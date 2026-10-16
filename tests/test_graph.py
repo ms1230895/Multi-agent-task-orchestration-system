@@ -23,8 +23,9 @@ from src.graph import (
     route_after_advance,
     route_after_planner,
 )
+from src.logger import EventCallback, trim
 from src.state import AgentState, initial_state
-from tests.fakes import RecordingFakeLLM, make_state, stub_executor
+from tests.fakes import RecordingFakeLLM, make_state, prompt_text, stub_executor
 
 
 def _settings(**env: str) -> Settings:
@@ -384,3 +385,148 @@ def test_ac27_stub_executor_no_longer_exists_in_src() -> None:
 def test_ac27_stub_executor_from_fakes_returns_step_text() -> None:
     state = make_state(plan=["a", "b"], current_step=1)
     assert stub_executor(state) == {"last_output": "stub output for step 2: b"}
+
+
+# ---- Session 5: events from advance (AC13, AC16) ----
+
+
+def _collector() -> tuple[list[tuple[str, dict[str, Any]]], EventCallback]:
+    """Return a list and a callback that appends every event to it."""
+    events: list[tuple[str, dict[str, Any]]] = []
+
+    def collect(event: str, data: dict[str, Any]) -> None:
+        events.append((event, data))
+
+    return events, collect
+
+
+def _broken_callback(event: str, data: dict[str, Any]) -> None:
+    """A callback that always raises."""
+    raise RuntimeError("callback crashed")
+
+
+def test_ac13_advance_retry_route_emits_one_step_retry_event() -> None:
+    events, collect = _collector()
+    state = _advance_state(verdict="retry", current_step=1, retries=1, feedback="f" * 700)
+    advance(state, settings=S, on_event=collect)
+    # WHY: the trace must show that a step was sent back, which step, and why.
+    assert events == [
+        (
+            "retry",
+            {"kind": "step", "step": 1, "attempt": 2, "reason": trim("f" * 700, 500)},
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {},
+        {"current_step": 1},
+        {"verdict": "retry", "retries": 2},
+        {"verdict": "retry", "retries": 2, "replans": 1},
+    ],
+    ids=["next_step", "done", "replan", "failed"],
+)
+def test_ac13_advance_other_routes_emit_no_event(overrides: dict[str, Any]) -> None:
+    events, collect = _collector()
+    advance(_advance_state(**overrides), settings=S, on_event=collect)
+    # WHY: only a retry is a new fact; the other routes show up in the next events.
+    assert events == []
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [{}, {"current_step": 1}, {"verdict": "retry"}, {"verdict": "retry", "retries": 2}],
+    ids=["next_step", "done", "retry", "replan"],
+)
+def test_ac16_advance_raising_callback_does_not_change_the_result(
+    overrides: dict[str, Any],
+) -> None:
+    plain = advance(_advance_state(**overrides), settings=S)
+    broken = advance(_advance_state(**overrides), settings=S, on_event=_broken_callback)
+    # WHY: a broken display must never change the route or the counters.
+    assert broken == plain
+
+
+# ---- Session 5: events through the whole graph (AC18, AC47) ----
+
+
+def _calc_call(expression: str = "2 ** 10") -> AIMessage:
+    """Build an executor reply that asks for one calculator call."""
+    call = {
+        "name": "calculator",
+        "args": {"expression": expression},
+        "id": "c1",
+        "type": "tool_call",
+    }
+    return AIMessage(content="", tool_calls=[call])
+
+
+def _scripted_llm() -> RecordingFakeLLM:
+    """A 1-step run: calculator call, text, a retry verdict, text again, then approve."""
+    return RecordingFakeLLM(
+        planner_replies=[_plan_reply("compute 2 ** 10")],
+        critic_replies=[_verdict_reply("retry", "say it again"), _verdict_reply("approve", "ok")],
+        executor_replies=[_calc_call(), AIMessage("1024"), AIMessage("The answer is 1024")],
+    )
+
+
+def test_ac18_whole_graph_emits_events_in_order() -> None:
+    events, collect = _collector()
+    graph = build_graph(llm=_scripted_llm(), settings=S, on_event=collect)
+    final = graph.invoke(
+        initial_state("do the task", "run-1"),
+        config={"recursion_limit": recursion_limit(S)},
+    )
+    # WHY: this is the order the trace reader and the console rely on.
+    assert [name for name, _ in events] == [
+        "plan_created",
+        "tool_call",
+        "critic_verdict",
+        "retry",
+        "critic_verdict",
+    ]
+    assert final["status"] == "done"
+
+
+def test_ac18_whole_graph_with_broken_callback_gives_same_final_state() -> None:
+    def run(on_event: EventCallback | None) -> AgentState:
+        graph = build_graph(llm=_scripted_llm(), settings=S, on_event=on_event)
+        return graph.invoke(
+            initial_state("do the task", "run-1"),
+            config={"recursion_limit": recursion_limit(S)},
+        )
+
+    # WHY: a broken display callback must not change a run, only hide its events.
+    assert run(_broken_callback) == run(None)
+
+
+def test_ac18_whole_graph_with_passed_in_executor_still_emits_planner_and_critic_events() -> None:
+    events, collect = _collector()
+    llm = RecordingFakeLLM(
+        planner_replies=[_plan_reply("only")], critic_replies=[_verdict_reply("approve", "ok")]
+    )
+    graph = build_graph(llm=llm, settings=S, executor=stub_executor, on_event=collect)
+    graph.invoke(
+        initial_state("do the task", "run-1"),
+        config={"recursion_limit": recursion_limit(S)},
+    )
+    # WHY: a test executor is used as it is, so it emits nothing, but the other nodes still do.
+    assert [name for name, _ in events] == ["plan_created", "critic_verdict"]
+
+
+def test_ac47_whole_graph_critic_prompt_contains_the_calculator_log_line() -> None:
+    llm = _scripted_llm()
+    graph = build_graph(llm=llm, settings=S)
+    graph.invoke(
+        initial_state("do the task", "run-1"),
+        config={"recursion_limit": recursion_limit(S)},
+    )
+    critic_prompts = [
+        prompt_text(call)
+        for role, call in zip(llm.roles, llm.calls, strict=True)
+        if role == "critic"
+    ]
+    # WHY: this is the fix for the critic rejecting correct work it could not see (runs R2-R5).
+    assert 'calculator({"expression": "2 ** 10"}) -> ok: 1024' in critic_prompts[0]
