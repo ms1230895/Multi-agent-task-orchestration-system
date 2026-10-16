@@ -12,7 +12,7 @@
 - [x] Step 5: Calculator
 - [x] Step 6: File tools
 - [x] Step 7: Web search
-- [ ] Step 8: Tool registry
+- [x] Step 8: Tool registry
 - [ ] Step 9: Validation gate (`src/validation.py`)
 - [ ] Step 10: Docs sync and final checks
 
