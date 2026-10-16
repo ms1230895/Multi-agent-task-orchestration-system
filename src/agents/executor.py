@@ -35,6 +35,8 @@ NO_TOOLS_TEXT = "(no tools called)"
 OMITTED_TEXT = "(earlier calls omitted)"
 # NOTE: equal to `validation.MAX_LOGGED_NAME_CHARS`: a tool name is cut the same way everywhere.
 MAX_LOG_NAME_CHARS = 100
+# NOTE: the two characters backslash and n, shown in the tool log where a result had a line break.
+LINE_BREAK_MARK = "\\n"
 
 ITERATION_LIMIT_OUTPUT = "Step not completed: tool iteration limit reached."
 EMPTY_REPLY_OUTPUT = "Step not completed: the executor gave an empty reply."
@@ -96,9 +98,16 @@ def _log_line(name: Any, args: Any, outcome: Any) -> str:
     and `ensure_ascii=False` keeps non-English text readable inside the character budget.
     """
     args_text = args if isinstance(args, str) else json.dumps(args, default=str, ensure_ascii=False)
+    # WHY: collapsing a result to single-spaced text made `pen\nbook\n\ncup` look like one line,
+    # and the critic said a 7-line file had 1 line (D45). Line breaks become the two visible
+    # characters backslash-n, so the line structure survives and one call is still one line.
+    # Every other kind of whitespace (tab, U+2028, ...) still collapses to a space.
+    outcome_text = (
+        str(outcome).replace("\r\n", "\n").replace("\r", "\n").replace("\n", LINE_BREAK_MARK)
+    )
     return (
         f"{_one_line(name, MAX_LOG_NAME_CHARS)}({_one_line(args_text, MAX_LOG_ITEM_CHARS)}) -> "
-        f"{_one_line(outcome, MAX_LOG_ITEM_CHARS)}"
+        f"{_one_line(outcome_text, MAX_LOG_ITEM_CHARS)}"
     )
 
 

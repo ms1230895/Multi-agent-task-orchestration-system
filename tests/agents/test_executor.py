@@ -18,9 +18,11 @@ from src.agents.executor import (
     EMPTY_REPLY_OUTPUT,
     ITERATION_LIMIT_OUTPUT,
     MAX_CALLS_PER_REPLY,
+    MAX_LOG_ITEM_CHARS,
     MAX_STEP_OUTPUT_CHARS,
     MAX_TOOL_RESULT_CHARS,
     OMITTED_TEXT,
+    _log_line,
     run_executor,
 )
 from src.config import Settings, load_settings
@@ -652,3 +654,32 @@ def test_review_tool_log_keeps_the_newest_call_when_it_is_too_long(
     assert result["last_tools"].startswith(OMITTED_TEXT)
     assert result["last_tools"].endswith("-> ok: the last call")
     assert len(result["last_tools"]) <= 1500
+
+
+# ---- Evaluation fix 2 (D45): the tool log keeps the line breaks of a result (AC38-AC40) ----
+
+
+@pytest.mark.parametrize(
+    ("outcome", "expected"),
+    [
+        ("pen\nbook\n\ncup\n", "pen\\nbook\\n\\ncup\\n"),
+        ("a\r\nb\rc", "a\\nb\\nc"),
+        ("a b\tc", "a b c"),
+    ],
+    ids=["unix_newlines", "windows_and_old_mac", "other_whitespace_still_collapses"],
+)
+def test_ac38_ac39_log_line_shows_line_breaks_as_backslash_n_on_one_line(
+    outcome: str, expected: str
+) -> None:
+    line = _log_line("read_file", {"path": "items.txt"}, outcome)
+    # WHY: the critic miscounted a 7-line file as 1 line when the log collapsed every newline;
+    # one call must still be exactly one line, so a result cannot forge a log entry.
+    assert line == f'read_file({{"path": "items.txt"}}) -> {expected}'
+    assert len(line.splitlines()) == 1
+
+
+def test_ac40_log_line_cuts_a_long_multi_line_result_to_the_limit() -> None:
+    line = _log_line("read_file", {}, "row\n" * 200)
+    outcome = line.split(" -> ", 1)[1]
+    assert len(outcome) == MAX_LOG_ITEM_CHARS
+    assert len(line.splitlines()) == 1

@@ -267,3 +267,11 @@ def test_ac35_ac36_run_critic_results_block_is_safe_and_the_prompt_allows_no_too
     system = " ".join(str(llm.calls[0][0].content).split())
     assert "<results>" in system
     assert "do not retry only because no tool was called" in system
+
+
+def test_ac41_critic_system_prompt_explains_backslash_n_in_the_tool_log() -> None:
+    llm = RecordingFakeLLM(critic_replies=[APPROVE])
+    run_critic(_state(), llm=llm)
+    system = " ".join(str(llm.calls[0][0].content).split())
+    # WHY: without this sentence the critic may read the marker as part of the file's text.
+    assert "the two characters \\n mark a line break" in system
