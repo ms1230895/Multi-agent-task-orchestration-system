@@ -28,6 +28,19 @@ python -m benchmark.runner --pass <pass_id> --summary
 ```
 Prints success rate, failed-tool-call rate and counts for an existing pass. Makes no LLM calls.
 
+### Compare passes and write the results block
+```bash
+python -m evaluation.report --passes main-off-1,main-on-1,second-on-1
+python -m evaluation.report --passes main-off-1,main-on-1,second-on-1 --write docs/results.md
+```
+Prints one Markdown block: a row per pass, pooled repeats, the gate off vs on ablation, the model comparison, before vs after a fix, what was not compared and why, and the trace count. Every success rate has a 95% interval. `--write` replaces only the text between the two `evaluation-report` marker lines. Read-only: no LLM calls, no tasks run. Exit code 0 done, 2 refused.
+
+### Group the failures of a pass
+```bash
+python -m evaluation.analyze --pass main-on-1 --out docs/analysis/main-on-1.md
+```
+Reads the pass results and their traces in `logs/`. Prints outcome classes, failed tool calls by tool and kind, repeated failing calls, critic rejections without a tool call, iteration-limit hits, and a short digest of every task that did not succeed. Read-only: no LLM calls. Exit code 0 done, 2 refused.
+
 ## Claude Code commands
 <!-- slash commands and subagents, with one line each on what they do -->
 

@@ -28,6 +28,8 @@ Report whatever numbers we actually get.
 - Run one task: `python -m src.run "your task here"` (prints the events live; the trace goes to `logs/<run_id>.jsonl`)
 - Run or resume a benchmark pass: `python -m benchmark.runner --pass <pass_id>` (results go to `benchmark/results/<pass_id>/`; add `--tasks calc-01,file-02` for a small pass, `--verbose` for live events)
 - Show a pass summary without running anything: `python -m benchmark.runner --pass <pass_id> --summary`
+- Compare passes (ablation, model, before/after fix) and update the results block: `python -m evaluation.report --passes main-off-1,main-on-1 [--write docs/results.md]` (read-only, no LLM calls)
+- Group the failures of a pass from its traces: `python -m evaluation.analyze --pass <pass_id> [--out docs/analysis/<pass_id>.md]` (read-only, no LLM calls)
 
 ## Architecture in brief
 Graph: START → planner → executor → critic → advance → router. If the planner fails, planner → finalize.
@@ -40,6 +42,7 @@ Full detail: `docs/specs/architecture.md`. Read it before changing the structure
 ## Project layout
 - `src/`: config.py, state.py, tools/, validation.py, agents/, graph.py, run.py, logger.py, console.py
 - `benchmark/`: tasks.json, tasks.py, text.py, checkers.py, runner.py, results/
+- `evaluation/`: passes.py, report.py, analyze.py (read-only tools over `benchmark/results/` and `logs/`; outside the code fingerprint on purpose)
 - `logs/` (run traces), `workspace/` (sandbox for file tools), `tests/` (mirrors `src/`)
 - `docs/specs/` (what we build), `docs/plans/` (plans and progress), `docs/project-memory.md`
 - `.claude/`: rules/, skills/, agents/, hooks/

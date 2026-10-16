@@ -158,3 +158,15 @@ Manifests and results are small and are the evidence behind the CV numbers. Trac
 - **Docs.** The spec, plan and progress now name `smoke-2` (the committed smoke pass); the untracked `smoke-1` (recorded with `MAX_REPLANS=2`) was deleted.
 
 **Deferred (not fixed, decide later):** `extract_numbers` reads `.5` as 5, `-.5` and the Unicode minus `−5` as +5 (no current task is affected); setup paths `.`, `dir/`, `.gitkeep` and file/folder clashes pass validation; `OSError` in `main` gives a traceback (exit 1) and not exit 2; invisible characters in `text.py` and one test string; one shared `number_matches` helper (the tolerance formula is written twice); build `config` once and split `run_pass` (134 lines); `code_fingerprint` ignores a custom `tasks_path`; missing `# WHY:` comments and one docstring in `runner.py`, `CATEGORY_ORDER` placement; spec wording for the pause and Ctrl-C messages and the `summarize` keys; a pass lock against two runners; `-c core.fsmonitor=false` for `git status`; an allowlist for `config` in the manifest; tests for `KeyboardInterrupt` or a plain exception raised by `run_fn`, a manifest without `results.jsonl`, and a weak "model" refusal assertion.
+
+
+## Session 7: evaluation (2026-10-17)
+
+### D41. The evaluation tools live in `evaluation/`, not in `benchmark/`
+`evaluation/passes.py`, `report.py` and `analyze.py` are read-only tools over `benchmark/results/` and `logs/`. **Why:** the code fingerprint (D34) covers `benchmark/*.py`, so a tool in `benchmark/` would change it on every edit. The baseline passes could then not be resumed after a pause, and `main-off-1` and `main-on-1` could end with different fingerprints although the agent code is the same. In `evaluation/` the tools can be built and fixed while the baseline passes run. Architecture gets a layer 8 row.
+
+### D42. `evaluation/` imports three private names from `benchmark/runner.py`
+`_read_manifest`, `_read_results` and `_redact`. **Why:** results must be read and redacted exactly as the runner wrote them, and a copy could drift. Making them public would edit `runner.py` and change the fingerprint before the baseline passes. **Deferred:** make them public in a later session. A test imports them, so a rename fails loudly.
+
+### D43. Comparison rules: pooled sums, one difference, Wilson intervals
+Complete passes with the same model, config, fingerprint and task ids are pooled by summing counts and recomputing rates (never averaging). Two groups are compared only when they differ in exactly one thing: the two gate flags (ablation), the model, or the code fingerprint (before/after a fix). Every other pair with the same tasks and model is listed under "not compared". Success rates always carry a 95% Wilson interval. **Why:** with 30 tasks one task is 3.3 points, so a difference between two passes is meaningless without an interval, and a pair that differs in two things measures neither. A negative reduction (the gate added failed calls) is shown, not hidden, and a reduction is `n/a` when the off pass has no failed calls.
