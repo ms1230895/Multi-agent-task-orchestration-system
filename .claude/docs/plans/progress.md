@@ -15,8 +15,8 @@
 
 ## To do (setup)
 - [ ] Specs in `docs/specs/` and `docs/plans/roadmap.md`
-- [ ] `.claude/settings.json` (permissions, default Manual mode, hooks)
-- [ ] Hook scripts (format, open edited file, unit tests on stop)
+- [x] `.claude/settings.json` (permissions, default Manual mode, hooks)
+- [x] Hook scripts (format, open edited file, unit tests on stop)
 - [ ] Subagents: code-reviewer, test-writer
 - [ ] Skills: implement-step, update-progress
 - [ ] GitHub repo and issues
