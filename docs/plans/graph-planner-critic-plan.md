@@ -6,7 +6,7 @@
 
 ## Progress
 - [x] Step 1: Scaffolding and `MAX_PLAN_STEPS`
-- [ ] Step 2: State (`src/state.py`)
+- [x] Step 2: State (`src/state.py`)
 - [ ] Step 3: JSON parsing helper (`src/agents/parsing.py`)
 - [ ] Step 4: Planner (`src/agents/planner.py`)
 - [ ] Step 5: Critic (`src/agents/critic.py`)
