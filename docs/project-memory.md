@@ -87,3 +87,11 @@ No extra description: built from the roadmap entry for session 6, `docs/specs/ar
 go
 ```
 `/implement` was run without a feature name and Claude asked once, listing the 9 steps it would build in one go; "go" started them. The real smoke pass (step 10) needs you: set `.env`, then run `python -m benchmark.runner --pass <pass_id> --tasks calc-01,search-01,file-02` twice. Model: sonnet, effort medium.
+
+### 2026-10-17: Test, review, and fix the review warnings (session 6)
+```
+/test benchmark
+/code-review
+ya fix all 6 quickly
+```
+Said after `/code-review` listed 0 Critical and 6 Warnings. Claude fixed all 6 Warnings and listed the Suggestions as deferred in D40. Model: sonnet, effort medium (review itself: sonnet, high).
