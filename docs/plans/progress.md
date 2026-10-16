@@ -4,6 +4,7 @@
 - **Phase:** Build (roadmap session 7 of 9 next)
 - **Last completed:** Session 6, benchmark: done, waiting for `/git-feature` (837 tests pass; see below). Before that, Session 5, tracing-and-first-runs: done (510 tests pass; code review found 0 Critical, 8 Warnings fixed, Suggestions deferred in D31; `docs/plans/tracing-and-first-runs-plan.md`, `docs/plans/first-runs.md`, decisions D23-D31)
 - **Next:** `/git-feature` for benchmark, then Session 7, evaluation (spec: opus, high; implementation: sonnet, medium)
+- **Follow-up fix `feature/fix-line-separator-test`:** done. A VS Code buffer stripped the literal U+2028 from a test; the test now writes it as the escape `\u2028`. Tip: close or revert stale editor tabs before a session.
 - **Session 5, tracing-and-first-runs:** Merged into main
 - **Session 6, benchmark:** Implemented, tested (327 benchmark tests; 837 in the suite) and code-reviewed (0 Critical; the 6 Warnings fixed, Suggestions deferred in D40). Next: `/git-feature` (`docs/specs/benchmark.md`, `docs/plans/benchmark-plan.md`, decisions D32-D40). Smoke pass `smoke-2` (3 tasks, `gpt-oss:120b-cloud`, `MAX_REPLANS=1`): 3/3 success, resume skipped all 3. Finding for session 7: file-02 passed but cost 6 step retries and 1 replan, because the planner splits read/extract/return into 3 steps and the critic rejects steps without a tool call (first-run problem P2 again). Before any full pass: keep `MAX_REPLANS=1` in `.env`. Note: `smoke-2` cannot be resumed any more (the code fingerprint changed after the review fixes); start new pass ids.
 
