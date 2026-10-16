@@ -210,6 +210,26 @@ def test_review_print_record_uses_the_event_colours_table(monkeypatch: pytest.Mo
     assert "\x1b[35m" not in styled
 
 
+def test_format_record_every_event_matches_printed_lines_and_has_html_colour_ac4() -> None:
+    failed_call = {"tool": "read_file", "args": {}, "ok": False, "error": "file not found"}
+    failed_end = {**SAMPLE_DATA["run_end"], "status": "failed"}
+    records = [_record(event, data) for event, data in SAMPLE_DATA.items()]
+    records += [_record("tool_call", failed_call), _record("run_end", failed_end)]
+    seen_colours: set[str] = set()
+    for record in records:
+        out = _recording_console()
+        console_module.print_record(record, out=out)
+        lines = console_module.format_record(record)
+        # WHY: the terminal and the Streamlit UI must show the same words; both read this
+        # one function.
+        assert out.export_text().splitlines() == [text for text, _ in lines], record["event"]
+        seen_colours |= {colour for _, colour in lines}
+
+    # WHY: the browser needs a hex for every colour the formatter can return.
+    assert seen_colours <= set(console_module.HTML_COLOURS)
+    assert {console_module.ERROR, console_module.EXECUTOR} <= seen_colours
+
+
 @pytest.mark.parametrize("step", [None, "x", 1.5])
 def test_review_print_record_critic_verdict_with_odd_step_does_not_raise(step: object) -> None:
     out = _terminal_console()

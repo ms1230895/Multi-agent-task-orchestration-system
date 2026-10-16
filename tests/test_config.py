@@ -217,3 +217,63 @@ def test_bounds_table_matches_settings_field_bounds() -> None:
         if ge is not None and le is not None:
             declared[name] = (ge, le)
     assert declared == config._BOUNDS
+
+
+# ---- Streamlit UI settings (spec streamlit-ui, AC1 to AC3) ----
+
+
+def test_load_ui_settings_flag_and_model_choices_from_env_ac1() -> None:
+    """AC1: live runs are off by default; choices are main then alt; a bad flag is refused."""
+    # WHY: a hosted copy without the flag must stay replay-only, and the browser may only be
+    # offered the models named in `.env`.
+    off = config.load_ui_settings({})
+    assert off.allow_live_runs is False
+    assert off.model_choices == ()
+
+    assert config.load_ui_settings({"OLLAMA_MODEL": "m1"}).model_choices == ("m1",)
+    both = config.load_ui_settings({"OLLAMA_MODEL": "m1", "OLLAMA_MODEL_ALT": "m2"})
+    assert both.model_choices == ("m1", "m2")
+    same = config.load_ui_settings({"OLLAMA_MODEL": "m1", "OLLAMA_MODEL_ALT": "m1"})
+    assert same.model_choices == ("m1",)
+    assert config.load_ui_settings({"OLLAMA_MODEL_ALT": "m2"}).model_choices == ()
+
+    for word in ("true", "YES", "1"):
+        assert config.load_ui_settings({"UI_ALLOW_LIVE_RUNS": word}).allow_live_runs is True
+    assert config.load_ui_settings({"UI_ALLOW_LIVE_RUNS": ""}).allow_live_runs is False
+
+    with pytest.raises(ConfigError) as error:
+        config.load_ui_settings({"UI_ALLOW_LIVE_RUNS": "maybe"})
+    assert "UI_ALLOW_LIVE_RUNS" in str(error.value)
+    assert "maybe" not in str(error.value)
+
+    with pytest.raises(ValidationError):
+        off.allow_live_runs = True  # type: ignore[misc]
+
+
+def test_load_settings_ignores_ui_variables_and_keeps_nine_fields_ac2() -> None:
+    """AC2/AC3: UI variables do not change `Settings`, whose field set stays exactly nine."""
+    # WHY: `Settings.model_dump()` is `run_end.config` and the pass manifest config (D43). A new
+    # field would make new passes look different from the baseline passes and block comparing.
+    plain = load_settings({"OLLAMA_MODEL": "m1"})
+    with_ui = load_settings(
+        {
+            "OLLAMA_MODEL": "m1",
+            "OLLAMA_MODEL_ALT": "m2",
+            "UI_ALLOW_LIVE_RUNS": "maybe",
+        }
+    )
+
+    assert with_ui == plain
+    expected = {
+        "enable_retry",
+        "enable_validation",
+        "max_replans",
+        "max_retries",
+        "max_tool_iterations",
+        "ollama_model",
+        "ollama_temperature",
+        "ollama_timeout_s",
+        "tool_retry_attempts",
+    }
+    assert set(Settings.model_fields) == expected
+    assert set(plain.model_dump()) == expected
