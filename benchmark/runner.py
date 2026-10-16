@@ -12,12 +12,20 @@ import json
 import re
 import shutil
 import subprocess
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
-from benchmark.tasks import BenchmarkTask
-from src.config import MAX_PLAN_STEPS, PROJECT_ROOT, Settings
+from rich.markup import escape
+
+from benchmark.checkers import CheckResult, run_checks
+from benchmark.tasks import TASKS_PATH, BenchmarkTask, load_tasks
+from src.config import MAX_PLAN_STEPS, PROJECT_ROOT, WORKSPACE_DIR, Settings, get_settings
+from src.console import ERROR, RETRY, SUCCESS, console, print_record, sanitize
+from src.logger import trim
+from src.run import run_task
+from src.state import AgentState
 
 RESULTS_DIR = PROJECT_ROOT / "benchmark" / "results"
 
@@ -34,6 +42,41 @@ MANIFEST_SCHEMA_VERSION = 1
 PASS_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 
 GIT_TIMEOUT_S = 10
+
+# WHY: the result line keeps the answer short; the full text is in the trace (`run_end`).
+MAX_RESULT_ANSWER_CHARS = 500
+MAX_TOOL_NAME_CHARS = 100
+
+PassOutcome = Literal["complete", "paused"]
+# NOTE: same call shape as `src.run.run_task`; tests pass a fake with scripted states.
+RunFn = Callable[..., AgentState]
+
+# WHY: these errors mean "Ollama or the network could not serve the call", never "the agent
+# did badly". The agents cannot cause them, so the task must not be recorded as a failure
+# (architecture 5, D12, D24). The Ollama client turns `httpx.ConnectError` into
+# `ConnectionError` and raises `ResponseError` for every server answer that is an error
+# (usage cap, rate limit, not signed in, server error); httpx timeouts pass through.
+# RISK: a guess from reading the client code (like D6). The first real usage cap will show
+# the real text in `paused.jsonl`; adjust this list then.
+INFRA_ERROR_TYPES = frozenset(
+    {
+        "ConnectionError",
+        "ConnectionRefusedError",
+        "ConnectionResetError",
+        "ConnectionAbortedError",
+        "TimeoutError",
+        "ConnectError",
+        "ConnectTimeout",
+        "ReadTimeout",
+        "WriteTimeout",
+        "PoolTimeout",
+        "ReadError",
+        "WriteError",
+        "RemoteProtocolError",
+        "NetworkError",
+        "ResponseError",
+    }
+)
 
 
 class PassRefused(Exception):
@@ -300,3 +343,243 @@ def _select_tasks(tasks: list[BenchmarkTask], task_ids: list[str] | None) -> lis
             raise PassRefused(f"unknown task id: {task_id[:40]}")
     wanted = set(task_ids)
     return [task for task in tasks if task.id in wanted]
+
+
+def is_infra_error(error: str) -> bool:
+    """Tell whether a state's `error` text is an infrastructure error (see `INFRA_ERROR_TYPES`).
+
+    Args:
+        error: `"<ExceptionType>: <message>"`, or `""` for a run that did not crash.
+
+    Returns:
+        True when the exception type before the first `:` is an infrastructure type. Anything
+        else (`""`, `GraphRecursionError`, `ValueError`, a bug) is not.
+    """
+    return error.split(":", 1)[0].strip() in INFRA_ERROR_TYPES
+
+
+class _RunCollector:
+    """An `on_record` callback that keeps what the runner needs from one run's events.
+
+    WHY: `run_task` returns the final state, but the model, the counters and the duration
+    only exist in the `run_end` record, and the tool names only in `tool_call` records.
+    """
+
+    def __init__(self, verbose: bool) -> None:
+        self.run_end: dict[str, Any] | None = None
+        self.tools: list[str] = []
+        self._verbose = verbose
+
+    def __call__(self, record: dict[str, Any]) -> None:
+        """Take one trace record. With `--verbose` also show it live."""
+        event = record.get("event")
+        data = record.get("data")
+        if event == "run_end":
+            self.run_end = record
+        elif event == "tool_call" and isinstance(data, dict):
+            name = data.get("tool")
+            if isinstance(name, str):
+                name = trim(name, MAX_TOOL_NAME_CHARS)
+                if name not in self.tools:
+                    self.tools.append(name)
+        if self._verbose:
+            print_record(record)
+
+
+def _append_line(path: Path, record: dict[str, Any]) -> None:
+    """Append one JSON line and close the file.
+
+    WHY: one open-write-close per line means a crash or Ctrl-C keeps every finished task,
+    and resume continues from there. `ensure_ascii` keeps U+2028 in web text from splitting
+    a line (same rule as the traces, D31).
+    """
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, ensure_ascii=True, default=str) + "\n")
+
+
+def _result_line(
+    task: BenchmarkTask,
+    state: AgentState,
+    run_end: dict[str, Any],
+    tools_used: list[str],
+    checks: list[CheckResult],
+) -> dict[str, Any]:
+    """Build the `results.jsonl` line of one finished task (spec section 4).
+
+    WHY: success needs the run to be `done` AND every check to pass. A run the agent gave up
+    on carries "Task failed: ..." plus a partial result; counting it would make the agent
+    look better than it is. `checks_passed` is stored too, so that case stays visible.
+    """
+    checks_passed = all(check.passed for check in checks)
+    data = run_end.get("data", {})
+    return {
+        "task_id": task.id,
+        "category": task.category,
+        "run_id": state["run_id"],
+        "model": run_end["model"],
+        "success": state["status"] == "done" and checks_passed,
+        "status": state["status"],
+        "checks_passed": checks_passed,
+        "checks": [check.model_dump() for check in checks],
+        "error": state["error"],
+        "final_answer": trim(state["final_answer"], MAX_RESULT_ANSWER_CHARS),
+        "tools_used": tools_used,
+        "counters": dict(data.get("counters", {})),
+        "duration_ms": data.get("duration_ms", 0),
+        "finished_at": _timestamp(),
+    }
+
+
+def _say(text: str, colour: str | None = None) -> None:
+    """Print one line, safe against markup and control characters in LLM or web text."""
+    console.print(escape(sanitize(text)), style=colour, highlight=False, emoji=False)
+
+
+def _progress_text(position: int, total: int, line: dict[str, Any]) -> str:
+    """Write the one-line progress message, with the reason when a task fails."""
+    seconds = line["duration_ms"] / 1000
+    head = f"[{position}/{total}] {line['task_id']} {'PASS' if line['success'] else 'FAIL'}"
+    if line["success"]:
+        return f"{head} {seconds:.1f} s"
+    reasons: list[str] = []
+    if line["status"] != "done":
+        reasons.append(f"run {line['status']}" + (f" ({line['error']})" if line["error"] else ""))
+    failed = [check for check in line["checks"] if not check["passed"]]
+    if failed:
+        reasons.append(f"{failed[0]['type']}: {failed[0]['detail']}")
+    return f"{head} {seconds:.1f} s - " + "; ".join(reasons)
+
+
+def run_pass(
+    pass_id: str,
+    *,
+    task_ids: list[str] | None = None,
+    settings: Settings | None = None,
+    run_fn: RunFn = run_task,
+    tasks_path: Path = TASKS_PATH,
+    results_root: Path = RESULTS_DIR,
+    workspace: Path = WORKSPACE_DIR,
+    root: Path = PROJECT_ROOT,
+    verbose: bool = False,
+) -> PassOutcome:
+    """Run (or resume) a pass: every task through `run_fn`, checked, saved one line at a time.
+
+    Args:
+        pass_id: the pass name, also its folder name under `results_root`.
+        task_ids: run only these tasks (new pass), or assert the pass has exactly these
+            (resume). Default: all tasks (new pass), the manifest's tasks (resume).
+        settings: limits, flags and model. Default: `get_settings()`.
+        run_fn: the function that runs a task. Default: `run_task`; tests pass a fake.
+        tasks_path: the task file.
+        results_root: the folder that holds the pass folders.
+        workspace: the sandbox folder that is emptied before every task.
+        root: the project folder, for the code fingerprint and git info.
+        verbose: show every trace event live.
+
+    Returns:
+        `"complete"` when every task has a result, `"paused"` after an infrastructure error.
+
+    Raises:
+        PassRefused: bad pass id or task id, a pass whose model, settings, tasks or code differ
+            from its manifest, a broken `results.jsonl`, or a run on another model.
+        TasksFileError: the task file is invalid.
+        ConfigError: the settings are missing or invalid.
+    """
+    # STEP 1: check everything that can be refused BEFORE a folder is created, so a refusal
+    # leaves no trace on disk.
+    _check_pass_id(pass_id)
+    if settings is None:
+        settings = get_settings()
+    tasks = load_tasks(tasks_path)
+    requested = _select_tasks(tasks, task_ids)
+    fingerprint = code_fingerprint(root)
+    config = {**settings.model_dump(), "max_plan_steps": MAX_PLAN_STEPS}
+
+    pass_dir = results_root / pass_id
+    manifest_path = pass_dir / MANIFEST_NAME
+    results_path = pass_dir / RESULTS_NAME
+    is_new = not manifest_path.exists() and (not pass_dir.exists() or not any(pass_dir.iterdir()))
+
+    # STEP 2: a new pass writes its manifest; a resumed pass must match it exactly.
+    if is_new:
+        planned = requested
+        commit, dirty = _git_info(root)
+        manifest = _build_manifest(
+            pass_id, settings, [task.id for task in planned], fingerprint, commit, dirty
+        )
+        _write_manifest(manifest_path, manifest)
+        results_path.touch()
+        if dirty:
+            _say("warning: code in src/ or benchmark/ has uncommitted changes (git_dirty)", RETRY)
+    else:
+        manifest = _read_manifest(manifest_path)
+        wanted_ids = [task.id for task in requested] if task_ids is not None else None
+        current = {
+            "model": settings.ollama_model,
+            "config": config,
+            "code_fingerprint": fingerprint,
+            "task_ids": wanted_ids if wanted_ids is not None else manifest["task_ids"],
+        }
+        differing = _compare_manifest(manifest, current)
+        if differing:
+            raise PassRefused(
+                f"cannot resume pass '{pass_id}': these differ from its manifest: "
+                + ", ".join(differing)
+                + ". Start a new pass id instead."
+            )
+        planned = _select_tasks(tasks, manifest["task_ids"])
+
+    # STEP 3: skip the tasks that already have a result.
+    results = _read_results(results_path)
+    done_ids = {record["task_id"] for record in results}
+    remaining = [task for task in planned if task.id not in done_ids]
+    finished = len(planned) - len(remaining)
+    _say(
+        f"Pass {pass_id}: model {manifest['model']}, {finished}/{len(planned)} tasks already done."
+    )
+    # WARNING: the workspace is emptied before every task; files put there by hand are lost.
+    _say(f"warning: {workspace} is emptied before every task", RETRY)
+
+    # STEP 4: one task at a time.
+    for task in remaining:
+        prepare_workspace(task, workspace)
+        collector = _RunCollector(verbose)
+        state = run_fn(task.task, settings=settings, on_record=collector)
+
+        # WHY: a usage cap or connection error says nothing about the agent. Write no result,
+        # so the task runs again on resume (architecture 5).
+        if is_infra_error(state["error"]):
+            _append_line(
+                pass_dir / PAUSED_NAME,
+                {
+                    "task_id": task.id,
+                    "run_id": state["run_id"],
+                    "error": state["error"],
+                    "at": _timestamp(),
+                },
+            )
+            _say(
+                f"paused at {task.id}: {state['error']}. "
+                f"Resume later with: python -m benchmark.runner --pass {pass_id}",
+                RETRY,
+            )
+            return "paused"
+
+        # WHY: `run_task` always writes a `run_end`; without one the model and counters are
+        # unknown, and a result without them would be unreliable evidence.
+        run_end = collector.run_end
+        if run_end is None:
+            raise PassRefused(f"the run for {task.id} produced no run_end event; pass stopped")
+        # WHY: this should never happen. If it does, the pass would mix models.
+        if run_end.get("model") != manifest["model"]:
+            raise PassRefused(
+                f"the run for {task.id} used a different model than the manifest; pass stopped"
+            )
+
+        checks = run_checks(task, state["final_answer"], workspace)
+        line = _result_line(task, state, run_end, collector.tools, checks)
+        _append_line(results_path, line)
+        finished += 1
+        _say(_progress_text(finished, len(planned), line), SUCCESS if line["success"] else ERROR)
+
+    return "complete"
