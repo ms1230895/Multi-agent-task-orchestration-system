@@ -4,7 +4,7 @@
 - **Phase:** Build (roadmap session 3 of 9 next)
 - **Last completed:** Session 2, foundation-tools-validation: done (227 tests pass, code review fixes applied; `docs/plans/foundation-tools-validation-plan.md`, decisions in `docs/plans/decisions.md`)
 - **Next:** Session 3, graph-planner-critic (spec: opus, high; implementation: sonnet, medium)
-- **Current:** Session 3, graph-planner-critic: spec approved; plan ready, waiting for approval (`docs/plans/graph-planner-critic-plan.md`)
+- **Current:** Session 3, graph-planner-critic: spec approved; plan approved, implementing (`docs/plans/graph-planner-critic-plan.md`)
 
 ## Done
 - [x] Project folder and `.claude/` skeleton

@@ -2,7 +2,7 @@
 
 **Spec:** docs/specs/graph-planner-critic.md
 **Branch:** feature/graph-planner-critic
-**Status:** Waiting for approval
+**Status:** Approved
 
 ## Progress
 - [ ] Step 1: Scaffolding and `MAX_PLAN_STEPS`
