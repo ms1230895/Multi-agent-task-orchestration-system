@@ -47,3 +47,10 @@ No extra description: built from the roadmap entry for session 4, `docs/specs/ar
 /create-spec tracing-and-first-runs
 ```
 No extra description: built from the roadmap entry for session 5, `docs/specs/architecture.md`, and decisions D5, D6, D12, D15 and D18. Use this short form when the roadmap already describes the session well. Model: opus, effort high.
+
+### 2026-10-16: Implement session 5 in one go
+```
+/implement
+do all the step at once don't ask again and again also remember this that while implementing just ask once at the starting saying it will include these many steps and if user says go then implement all at once without asking again and again
+```
+Use it to build a whole plan after one go-ahead. Claude stops only on a failed check or at a step that needs you (real LLM runs, `.env`). Model: sonnet, effort medium.
