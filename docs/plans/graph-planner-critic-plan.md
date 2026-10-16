@@ -10,7 +10,7 @@
 - [x] Step 3: JSON parsing helper (`src/agents/parsing.py`)
 - [x] Step 4: Planner (`src/agents/planner.py`)
 - [x] Step 5: Critic (`src/agents/critic.py`)
-- [ ] Step 6: Stub executor (`src/agents/executor.py`)
+- [x] Step 6: Stub executor (`src/agents/executor.py`)
 - [ ] Step 7: Router logic (`decide`, `advance`, edges, `finalize`, `recursion_limit`)
 - [ ] Step 8: Graph wiring (`build_graph`) and end-to-end check
 - [ ] Step 9: Docs sync and final checks
