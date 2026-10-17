@@ -2,7 +2,7 @@
 
 A LangGraph system in which three LLM agents complete multi-step tasks on their own, using tools. A **Planner** splits the task into steps, an **Executor** carries out one step at a time (calling tools), and a **Critic** checks each result. Plain Python code, not the LLM, decides where the graph goes next, and every loop has a hard limit.
 
-Built from scratch as a learning project and a CV project. The system runs on Ollama cloud models (free plan). The numbers below are what was actually measured, including the ones that missed the targets.
+Built from scratch as a learning project. The system runs on Ollama cloud models (free plan). The numbers below are what was actually measured, including the ones that missed the targets.
 
 ## What it does
 
